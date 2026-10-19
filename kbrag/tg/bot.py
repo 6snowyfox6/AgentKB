@@ -30,6 +30,10 @@
 Без «*» чужим бот отвечает только их id (не чаще раза в 10 минут). Файл
 перечитывается на каждом сообщении, перезапускать бота после правки не нужно.
 
+Доступ к базам по людям — .local/access.yaml (kbrag/acl.py, python kbrag.py access): люди
+оттуда пускаются по id в Телеграме и видят только свои ветки; владельцы из
+telegram_users.txt — всё.
+
 Модель пишет до MAX_PARALLEL ответов сразу (по умолчанию 4, переменная
 KBRAG_PARALLEL): кто спросил сверх этого, получает «в очереди» с местом и ждёт. Вторая копия бота на том же компьютере не
 запускается: две копии забирают одни и те же сообщения, и на один /start
@@ -46,6 +50,7 @@ import threading
 import time
 from typing import Any
 
+from .. import acl
 from ..common import kb_from_args
 from ..kb import get as get_kb
 from . import ui
@@ -105,13 +110,35 @@ class Bot(AnswersMixin, MediaMixin, BrowseMixin, FactsMixin, KbsMixin):
             self.sessions.pop(old)
         return session
 
+    def _person(self, user_id: Any) -> acl.Person | None:
+        """Человек из .local/access.yaml по id в Телеграме; файл с ошибкой — никто."""
+        try:
+            return acl.load().by_telegram(user_id)
+        except acl.AccessError as exc:
+            self.log(f"  доступ: {exc}")
+            return None
+
     def allowed(self, user_id: Any) -> bool:
         everyone, owners = access(self.users_file)
-        return everyone or user_id in owners
+        return everyone or user_id in owners or self._person(user_id) is not None
 
     def guest(self, user_id: Any) -> bool:
-        """Не из списка — пишет в открытый бот (для журнала)."""
-        return user_id not in access(self.users_file)[1]
+        """Ни владелец, ни человек из access.yaml — пишет в открытый бот (лимит, журнал)."""
+        return user_id not in access(self.users_file)[1] and self._person(user_id) is None
+
+    def scope_for(self, user_id: Any) -> acl.Scope:
+        """Что видит человек (acl.py): владелец бота (telegram_users.txt) — всё; человек из
+        access.yaml — свои ветки; гость открытого бота — ветки гостей («гости»), а без
+        access.yaml — всё, как раньше."""
+        if user_id in access(self.users_file)[1]:
+            return None
+        person = self._person(user_id)
+        if person is not None:
+            return person.bases
+        try:
+            return acl.load().guests
+        except acl.AccessError:
+            return ()
 
     def over_limit(self, user_id: Any, now: float | None = None) -> float:
         """Гость открытого бота исчерпал вопросы за час: через сколько секунд следующий
@@ -136,7 +163,8 @@ class Bot(AnswersMixin, MediaMixin, BrowseMixin, FactsMixin, KbsMixin):
         self.tg.send(
             chat_id,
             f"Нет доступа. Ваш id: <code>{user_id}</code>\n"
-            "Владелец базы добавляет его в .local/telegram_users.txt.",
+            "Владелец базы добавляет его: python kbrag.py access add ИМЯ --telegram ID "
+            "--kb ВЕТКА (или в .local/telegram_users.txt — доступ ко всему).",
         )
 
     def handle(self, update: dict[str, Any]) -> None:
@@ -156,6 +184,10 @@ class Bot(AnswersMixin, MediaMixin, BrowseMixin, FactsMixin, KbsMixin):
             self.log(f"  чужой пользователь {user_id}: {text[:40]!r}")
             return
         self.log(f"  ← {user_id}{' (гость)' if self.guest(user_id) else ''}: {text[:60]!r}")
+        with acl.scoped(self.scope_for(user_id)):
+            self._on_text(chat_id, user_id, text)
+
+    def _on_text(self, chat_id: int, user_id: Any, text: str) -> None:
         session = self.session(chat_id)
         if is_question(text, session):
             wait = self.over_limit(user_id)
@@ -280,7 +312,8 @@ class Bot(AnswersMixin, MediaMixin, BrowseMixin, FactsMixin, KbsMixin):
         session = self.session(chat_id)
         toast = ""
         try:
-            toast = self.press(chat_id, mid, session, data) or ""
+            with acl.scoped(self.scope_for(user_id)):
+                toast = self.press(chat_id, mid, session, data) or ""
         except Exception as exc:  # noqa: BLE001
             self.log(f"  ошибка на кнопке {data!r}: {type(exc).__name__}: {exc}")
             toast = f"Ошибка: {type(exc).__name__}: {str(exc)[:120]}"
@@ -312,10 +345,15 @@ class Bot(AnswersMixin, MediaMixin, BrowseMixin, FactsMixin, KbsMixin):
                 session.stop.set()
                 return "Останавливаю…"
             return "Ответ уже готов"
-        if action in ("f", "how", "lk"):
+        if action in ("f", "how", "lk", "pdf"):
             record = session.answers.get(nums[0]) if nums else None
             if record is None:
                 return STALE
+            if action == "pdf":
+                articles = record.get("articles") or []
+                if len(nums) < 2 or not 1 <= nums[1] <= len(articles):
+                    return STALE
+                return self.send_pdf(chat_id, articles[nums[1] - 1])
             if action == "lk":
                 self.answer_links(chat_id, session, record)
                 return None

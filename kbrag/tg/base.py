@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .. import acl
 from . import ui
 from .access import KB_FILE, USERS_FILE, read_choice
 from .api import Telegram
@@ -106,7 +107,9 @@ class BotBase:
         """С какой базой дерева работает этот чат: выбранная /kb, иначе — с какой
         запущен бот. Выбранной базы больше нет в дереве (её убрали) — тоже по умолчанию."""
         chosen = self.choice.get(chat_id)
-        return self.chat_settings.kb if chosen is None else chosen
+        kb = self.chat_settings.kb if chosen is None else chosen
+        # Базу, к которой у человека нет доступа (acl.py), — нельзя: тогда его ветки.
+        return kb if acl.visible(kb) else ""
 
     def checks_conflicts(self, session: Session) -> bool:
         """Сверять ли статьи для этого чата: как выбрал человек, иначе — как в настройках."""

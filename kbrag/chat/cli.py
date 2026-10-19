@@ -52,11 +52,28 @@ def collect(events: Any, kb: str = "") -> dict[str, Any]:
             out["error"] = event["error"]
         elif kind == "done":
             out.update(
-                {k: event.get(k) for k in ("mode", "used", "unknown", "coverage", "model")}
+                {
+                    k: event.get(k)
+                    for k in ("mode", "used", "unknown", "coverage", "model", "articles")
+                }
                 | {"seconds": event.get("seconds"), "timings": event.get("timings")}
             )
     out["answer"] = text.strip()
     return out
+
+
+def print_articles(articles: list[dict[str, Any]]) -> None:
+    """Статьи, на которые опирается ответ: строка статьи, её фрагменты, ссылки."""
+    from .references import citation, doi_link
+
+    if not articles:
+        return
+    print("\nСтатьи, на которые опирается ответ:")
+    for i, item in enumerate(articles, start=1):
+        cited = ", ".join(f"[{n}]" for n in item["fragments"])
+        print(f"{i}. {citation(item)} — {cited}")
+        for link in dict.fromkeys(x for x in (doi_link(item.get("doi", "")), item.get("url")) if x):
+            print(f"   {link}")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -152,6 +169,7 @@ def main(argv: list[str] | None = None) -> int:
                     print(f"{mark} [{s['n']}] {s['title'][:80]}{year}{pages}")
                     if s.get("url"):
                         print(f"       {s['url']}")
+                print_articles(event.get("articles") or [])
                 if event["unknown"]:
                     print(
                         f"\nВнимание: модель сослалась на несуществующие фрагменты "

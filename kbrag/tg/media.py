@@ -4,8 +4,11 @@ from __future__ import annotations
 
 from typing import Any
 
+from .. import acl
 from . import ui
 from .base import STALE, BotBase
+
+PDF_LIMIT = 50 * 1024 * 1024  # Телеграм принимает файлы до 50 МБ
 
 
 class MediaMixin(BotBase):
@@ -83,4 +86,27 @@ class MediaMixin(BotBase):
             self.tg.send(chat_id, caption)
         else:
             self.tg.photo(chat_id, png, caption)
+        return None
+
+    def send_pdf(self, chat_id: int, item: dict[str, Any]) -> str | None:
+        """PDF статьи из ответа — файлом, с её строкой и процитированными страницами."""
+        from ..chat.references import citation, pdf_path
+        from ..index import db
+
+        path = pdf_path(str(item.get("doc_id") or ""))
+        if path is None:
+            return "PDF этой статьи на компьютере с базой нет"
+        try:
+            with db.connect(self.dsn) as conn:
+                if not db.visible_doc(conn, str(item["doc_id"])):
+                    return STALE
+        except Exception:  # noqa: BLE001 — база не ответила: без проверки не отдаём
+            if acl.current() is not None:
+                return "База не отвечает — попробуйте позже"
+        if path.stat().st_size > PDF_LIMIT:
+            return "PDF больше 50 МБ — Телеграм такой не примет"
+        pages = item.get("pages") or []
+        where = f"\nПроцитировано: с. {', '.join(map(str, pages[:8]))}" if pages else ""
+        # Подпись — простым текстом (sendDocument здесь без разметки), до 1024 знаков.
+        self.tg.document(chat_id, path.name, path.read_bytes(), citation(item)[:900] + where)
         return None

@@ -112,7 +112,7 @@ def config_of(language: str | None) -> str:
 # --------------------------------------------------------------------------- #
 CACHE_SEC = 300.0  # языки базы меняет только загрузка статей
 MAX_CONFIGS = 6  # больше словарей в одном запросе — медленнее, а пользы нет
-_CACHE: dict[str, tuple[float, list[str]]] = {}
+_CACHE: dict[tuple[str, Any], tuple[float, list[str]]] = {}  # (база, доступ)
 
 
 def query_configs(conn: Any, kb: str = "") -> list[str]:
@@ -121,7 +121,10 @@ def query_configs(conn: Any, kb: str = "") -> list[str]:
     from .db import in_kb
 
     now = time.monotonic()
-    cached = _CACHE.get(kb)
+    from .. import acl
+
+    key = acl.cache_key(kb)
+    cached = _CACHE.get(key)
     if cached and now - cached[0] < CACHE_SEC:
         return cached[1]
     clause, params = in_kb(kb, "c.doc_id")
@@ -141,7 +144,7 @@ def query_configs(conn: Any, kb: str = "") -> list[str]:
         if config not in found:
             found.append(config)
     found = found[:MAX_CONFIGS]
-    _CACHE[kb] = (now, found)
+    _CACHE[key] = (now, found)
     return found
 
 

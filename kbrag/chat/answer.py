@@ -45,6 +45,8 @@
                                                             ссылки на фрагмент (drop_uncited)
     {"type": "done", "mode": "база"|"без базы", "used": [1, 3], "unknown": [],
      "coverage": [5, 6], "removed": 2, "rounds": …,
+     "articles": [{"doc_id", "title", "authors", "year", "journal", "doi", "url",
+                   "fragments": [1, 3], "pages": [4, 5], "pdf": true}, …],
      "timings": {"plan": с, "search": с, "judge": с, "conflicts": с, "answer": с}, …}
                                                             (этапы, которых не было, — без ключа;
                                                             те же числа — строкой в
@@ -63,6 +65,7 @@ from typing import Any
 from ..kb import get as get_kb
 from ..llm import LLM, LLM_HOST, LLMError
 from ..paths import LOGS
+from . import references
 from .checks import NO_ANSWER, citations, coverage, drop_uncited, is_refusal
 from .conflicts import find_conflicts
 from .dataset import collect_dataset, dataset_sources, graph_candidates
@@ -377,6 +380,8 @@ def answer(
                     "used": used,
                     "unknown": unknown,
                     "coverage": [cited, claims],
+                    # Статьи, на которые опирается ответ (chat/references.py).
+                    "articles": references.articles(conn, sources, used),
                     "removed": len(removed),
                     "model": settings.model,
                     **closing("база"),

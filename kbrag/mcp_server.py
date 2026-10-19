@@ -22,6 +22,7 @@ stdin/stdout (MCP stdio), ничего другого туда не пишет.
     get_figure     рисунок статьи картинкой и его подпись
 
 Адрес сервера — KBRAG_SERVE (по умолчанию http://127.0.0.1:8000).
+Доступ ограничен (.local/access.yaml) — токен человека в KBRAG_TOKEN.
 """
 
 from __future__ import annotations
@@ -36,6 +37,9 @@ from typing import Any
 from .machine import value
 
 BASE = value("KBRAG_SERVE", "http://127.0.0.1:8000")
+# Токен входа (python kbrag.py access add): есть .local/access.yaml — без него сервер не
+# ответит; инструменты видят только базы этого человека.
+TOKEN = value("KBRAG_TOKEN", "")
 TIMEOUT = 120  # с: поиск с синонимами по большой базе — секунды, не минуты
 NOT_RUNNING = (
     "Сервер базы знаний не отвечает на {base}. Запустите его в отдельном окне: "
@@ -56,8 +60,11 @@ def _url(path: str, params: dict[str, Any]) -> str:
 
 def _fetch(path: str, **params: Any) -> tuple[bytes, str]:
     """Ответ сервера: тело и тип. Сервер ответил ошибкой — её JSON (там объяснение)."""
+    request = urllib.request.Request(_url(path, params))
+    if TOKEN:
+        request.add_header("X-KBRAG-Token", TOKEN)  # доступ к базам — по людям (acl.py)
     try:
-        with urllib.request.urlopen(_url(path, params), timeout=TIMEOUT) as response:
+        with urllib.request.urlopen(request, timeout=TIMEOUT) as response:
             return response.read(), response.headers.get_content_type()
     except urllib.error.HTTPError as exc:
         return exc.read(), "application/json"
@@ -107,11 +114,18 @@ def get_fragment(chunk_id: int) -> dict[str, Any]:
     return get_json("/api/fragment", chunk_id=chunk_id)
 
 
-def get_article(doc_id: str, text: bool = False) -> dict[str, Any]:
+def get_article(
+    doc_id: str, text: bool = False, offset: int = 0, limit: int = 20
+) -> dict[str, Any]:
     """Статья по doc_id: название, авторы, год, журнал, DOI, ссылка, язык, в каких базах
-    дерева лежит, рисунки (номер, страница, подпись), сколько формул. text=True — ещё и
-    весь текст по фрагментам."""
-    return get_json("/api/article", doc_id=doc_id, text="1" if text else None)
+    дерева лежит, рисунки (номер, страница, подпись), сколько формул.
+
+    text=True — ещё и текст по фрагментам, страницей: limit фрагментов (до 50, и не
+    больше ~60 тыс. знаков) начиная с offset. В ответе fragments_total — сколько их
+    всего, next_offset — с какого брать следующую страницу (null — это последняя)."""
+    if not text:
+        return get_json("/api/article", doc_id=doc_id)
+    return get_json("/api/article", doc_id=doc_id, text="1", offset=offset, limit=limit)
 
 
 def facts(name: str | None = None, kb: str | None = None) -> dict[str, Any]:

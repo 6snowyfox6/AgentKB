@@ -119,7 +119,7 @@ def test_store_formulas_and_refs() -> None:
 
 def test_marking_keeps_graph_facts() -> None:
     """Пометка $$…$$ — не изменение текста: факты фрагмента не стираются."""
-    old = [(0, 11, RHO), (1, 12, "старый текст")]
+    old = [(11, 0, RHO), (12, 1, "старый текст")]  # (id, ord, текст)
     rows = [
         {
             "doc_id": "d1",

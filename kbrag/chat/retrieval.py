@@ -13,6 +13,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any
 
+from .. import acl
 from ..index.search import cap_per_doc
 from ..kb import KB, languages
 from ..kb import get as get_kb
@@ -394,7 +395,8 @@ def retrieve(
         with ThreadPoolExecutor(min(JUDGE_WORKERS, len(batches))) as executor:
             answers = list(
                 executor.map(
-                    lambda b, seen=snapshot: judge(question, plan, b, seen, settings), batches
+                    acl.carry(lambda b, seen=snapshot: judge(question, plan, b, seen, settings)),
+                    batches,
                 )
             )
         judge_sec += time.monotonic() - started

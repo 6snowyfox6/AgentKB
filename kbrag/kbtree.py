@@ -61,13 +61,16 @@ def _title(path: str) -> str:
 def nodes(conn: Any = None) -> dict[str, Any]:
     """Дерево баз для показа (kb list, страница, Телеграм): узлы из базы и из папок
     настроек, по порядку пути, с названием и числом статей. conn=None — только папки."""
+    from . import acl
     from .index import db
 
     rows = {r["path"]: r for r in db.kb_nodes(conn)} if conn is not None else {}
     unplaced = db.unplaced(conn) if conn is not None else None
     configured = set(kb.configured())
     out = []
-    for path in sorted(set(rows) | configured):
+    # Человеку с ограниченным доступом (acl.py) — только его ветки, то, что под ними, и
+    # то, что над ними (по нему к ним идти).
+    for path in sorted(p for p in set(rows) | configured if acl.visible(p)):
         row = rows.get(path)
         out.append(
             {

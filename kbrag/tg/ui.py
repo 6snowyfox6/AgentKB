@@ -242,7 +242,13 @@ def answer_text(
         parts.append("<i>(пусто)</i>")
     if done.get("stopped"):
         parts.append("\n<i>— остановлено</i>")
-    if sources:
+    articles = done.get("articles") or []
+    if articles:
+        parts.append(
+            "\n<b>Статьи, на которые опирается ответ</b> — кнопки с номерами ниже открывают "
+            "фрагмент целиком\n" + "\n".join(article_line(i, a) for i, a in enumerate(articles, 1))
+        )
+    elif sources:
         used = set(done.get("used") or [])
         lines = [
             source_line(s) + ("" if s["n"] in used else " <i>(не процитирован)</i>")
@@ -269,13 +275,38 @@ def answer_text(
     return "\n".join(parts)
 
 
-def answer_keyboard(aid: int, sources: list[dict[str, Any]]) -> dict[str, Any] | None:
-    """Под ответом: фрагменты, связи из графа, как искал, новый разговор."""
+PDF_BUTTONS = 6  # кнопок «PDF n» под ответом
+
+
+def article_line(i: int, item: dict[str, Any]) -> str:
+    """«1. Иванов И. И. (2021). <a>Название</a>. Журнал — [1], [3]» — ссылка: DOI,
+    иначе страница издателя."""
+    from ..chat.references import citation, doi_link
+
+    link = doi_link(str(item.get("doi") or "")) or str(item.get("url") or "")
+    text = esc(citation(item)[:300])
+    title = esc(str(item.get("title") or "")[:200])
+    if is_link(link) and title and title in text:
+        text = text.replace(title, f'<a href="{esc(link)}">{title}</a>', 1)
+    cited = ", ".join(f"[{n}]" for n in item.get("fragments") or [])
+    pdf = " · PDF — кнопкой" if item.get("pdf") else ""
+    return f"{i}. {text} — {cited}{pdf}"
+
+
+def answer_keyboard(
+    aid: int, sources: list[dict[str, Any]], articles: list[dict[str, Any]] | None = None
+) -> dict[str, Any] | None:
+    """Под ответом: фрагменты, PDF статей, связи из графа, как искал, новый разговор."""
     frags = [button(f"[{s['n']}]", f"f:{aid}:{s['n']}") for s in sources[:FRAGMENT_BUTTONS]]
+    pdfs = [
+        button(f"PDF {i}", f"pdf:{aid}:{i}")
+        for i, a in enumerate(articles or [], start=1)
+        if a.get("pdf")
+    ][:PDF_BUTTONS]
     tail = [button("Как искал", f"how:{aid}"), button(MENU_NEW, "new")]
     if any(s.get("chunk_id") for s in sources):
         tail.insert(0, button("Связи", f"lk:{aid}"))
-    return inline([*rows_of(frags), tail])
+    return inline([*rows_of(frags), *rows_of(pdfs), tail])
 
 
 LINKS_IN_MESSAGE = 12

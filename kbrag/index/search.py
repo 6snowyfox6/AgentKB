@@ -164,12 +164,50 @@ _FLEETING = re.compile(r"^(.*[бвгджзклмнпрстфхцчшщ])[еоё]
 _NOUN_TAIL = re.compile(r"^[а-яё]{3,}(?:ом|ов|ем|ев)$")
 
 
+# Обратно — из косвенной формы к начальной: «рудного узла» → «узел». Стеммер даёт
+# «узла» основу «узл», а «узел» — «узел», и запрос в косвенной форме не находил текст
+# в начальной. С окончания существительного снимается падеж; основа на согласную с
+# л, к, ц, н, р — вариант со вставленной «е» и «о» (узел, песок, конец, угол).
+_CASE_ENDINGS = (
+    "ами",
+    "ями",
+    "ах",
+    "ях",
+    "ам",
+    "ям",
+    "ом",
+    "ем",
+    "ов",
+    "ей",
+    "а",
+    "у",
+    "ы",
+    "е",
+    "и",
+    "ю",
+)
+_CLUSTER = re.compile(r"^(.+[бвгджзклмнпрстфхцчшщ])([лкцнр])$")
+
+
+def _with_vowel(word: str) -> list[str]:
+    """«узла» → [«узел», «узол»]: начальная форма слова с беглой гласной."""
+    for ending in _CASE_ENDINGS:
+        stem = word[: -len(ending)]
+        if word.endswith(ending) and len(stem) >= 3:
+            match = _CLUSTER.match(stem)
+            if match:
+                return [f"{match.group(1)}{vowel}{match.group(2)}" for vowel in "ео"]
+            return []
+    return []
+
+
 def _variants(word: str) -> str:
     low = word.lower()
     options = [low]
     match = _FLEETING.match(low)
     if match:
         options.append(f"{match.group(1)}{match.group(2)}")
+    options += [v for v in _with_vowel(low) if v not in options]
     if _NOUN_TAIL.match(low):
         options.append(low + "а")
     return f"({' | '.join(options)})" if len(options) > 1 else low

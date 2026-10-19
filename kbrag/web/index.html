@@ -240,6 +240,10 @@
   @media (max-width: 640px) { table.dataset td.src { display: none; } }
   .kind { font-size: 12px; color: var(--muted); }
   .katex-display { margin: 0.4em 0; overflow-x: auto; overflow-y: hidden; }
+  .articles { margin: 10px 0; font-size: 14px; }
+  .articles ol { margin: 4px 0 0; padding-left: 22px; display: flex; flex-direction: column; gap: 4px; }
+  .articles .title { font-family: var(--serif); }
+  .articles a { white-space: nowrap; }
   .figures { display: flex; flex-wrap: wrap; gap: 12px; margin: 10px 0; }
   .figures figure { margin: 0; flex: 1 1 220px; max-width: 360px; }
   .figures img { width: 100%; height: auto; border: 1px solid var(--line, #ddd); border-radius: 6px;
@@ -405,6 +409,60 @@
 
 <script>
 const $ = (id) => document.getElementById(id);
+
+// -- вход ---------------------------------------------------------------------- //
+// Доступ к базам — по людям (kbrag/acl.py, .local/access.yaml). Токен — в cookie: его
+// шлют и запросы страницы, и картинки формул и рисунков. Ссылка вида /?token=… кладёт
+// токен в cookie и убирает его из адреса. Сервер ответил 401 — окно входа.
+const TOKEN_COOKIE = "kbrag_token";
+function setToken(token) {
+  const age = token ? 365 * 24 * 3600 : 0;
+  document.cookie = `${TOKEN_COOKIE}=${encodeURIComponent(token)}; path=/; max-age=${age}; SameSite=Strict`;
+}
+(() => {
+  const url = new URL(location.href);
+  const token = url.searchParams.get("token");
+  if (token) {
+    setToken(token);
+    url.searchParams.delete("token");
+    history.replaceState(null, "", url.pathname + url.search + url.hash);
+  }
+})();
+let loginShown = false;
+function showLogin(message) {
+  if (loginShown) return;
+  loginShown = true;
+  const box = document.createElement("div");
+  box.style.cssText = "position:fixed;inset:0;z-index:1000;display:flex;align-items:center;"
+    + "justify-content:center;background:color-mix(in srgb, var(--ground) 85%, transparent)";
+  const card = document.createElement("form");
+  card.style.cssText = "background:var(--surface);color:var(--ink);border:1px solid var(--rule);"
+    + "border-radius:8px;padding:20px;max-width:420px;width:calc(100% - 32px);font-family:var(--sans)";
+  card.innerHTML = "<strong>Вход в базу знаний</strong>"
+    + "<p style='color:var(--muted);margin:8px 0 12px'></p>"
+    + "<input type='password' autocomplete='current-password' placeholder='токен' "
+    + "style='width:100%;box-sizing:border-box;padding:8px;font:inherit'>"
+    + "<button type='submit' style='margin-top:12px;padding:6px 14px;font:inherit'>Войти</button>";
+  card.querySelector("p").textContent = message
+    || "Токен выдаёт владелец базы: python kbrag.py access add ИМЯ --kb ВЕТКА.";
+  card.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const value = card.querySelector("input").value.trim();
+    if (!value) return;
+    setToken(value);
+    location.reload();
+  });
+  box.append(card);
+  document.body.append(box);
+  card.querySelector("input").focus();
+}
+const plainFetch = window.fetch.bind(window);
+window.fetch = async (...args) => {
+  const response = await plainFetch(...args);
+  const url = String(args[0] instanceof Request ? args[0].url : args[0]);
+  if (response.status === 401 && url.includes("/api/")) showLogin();
+  return response;
+};
 
 // -- формулы ------------------------------------------------------------------- //
 // Формулы во фрагментах лежат между $$…$$ (index/formulas.py) — и в ответе модели тоже.
@@ -1598,6 +1656,58 @@ function renderNotInBase(ev) {
   return box;
 }
 
+// Статьи, на которые опирается ответ (chat/references.py): по строке на статью —
+// авторы, год, название, журнал; номера её фрагментов (щёлкнуть — фрагмент) и ссылки:
+// DOI, издатель, свой PDF на диске — сразу на процитированной странице.
+function renderArticles(bot, articles) {
+  const box = document.createElement("div");
+  box.className = "articles";
+  const head = document.createElement("div");
+  head.className = "sub";
+  head.textContent = "Статьи, на которые опирается ответ";
+  const list = document.createElement("ol");
+  for (const a of articles) {
+    const li = document.createElement("li");
+    const authors = (a.authors || []).slice(0, 3).join(", ") + ((a.authors || []).length > 3 ? " и др." : "");
+    const who = document.createElement("span");
+    who.textContent = [authors, a.year ? `(${a.year})` : ""].filter(Boolean).join(" ")
+      + (authors || a.year ? ". " : "");
+    const title = document.createElement("span");
+    title.className = "title";
+    title.textContent = a.title + (a.journal ? `. ${a.journal}` : "");
+    li.append(who, title, " — ");
+    for (const n of a.fragments) {
+      const c = document.createElement("span");
+      c.className = "cite";
+      c.dataset.n = n;
+      c.title = "фрагмент " + n;
+      c.textContent = n;
+      c.addEventListener("click", () => openSource(bot, n));
+      li.append(c);
+    }
+    const links = [];
+    const doi = (a.doi || "").trim();
+    if (doi) links.push(["DOI", doi.startsWith("http") ? doi : "https://doi.org/" + doi]);
+    if (a.url && !links.some(([, href]) => href === a.url)) links.push(["у издателя", a.url]);
+    if (a.pdf) {
+      const page = a.pages && a.pages.length ? a.pages[0] : null;
+      links.push([page ? `PDF, с. ${page}` : "PDF",
+        "/api/pdf?doc_id=" + encodeURIComponent(a.doc_id) + (page ? "#page=" + page : "")]);
+    }
+    for (const [label, href] of links) {
+      const link = document.createElement("a");
+      link.href = href;
+      link.target = "_blank";
+      link.rel = "noopener";
+      link.textContent = label + " ↗";
+      li.append(" ", link);
+    }
+    list.append(li);
+  }
+  box.append(head, list);
+  return box;
+}
+
 // Рисунки фрагментов, на которые сослался ответ: картинка, «Рис. 3 к [2]», подпись.
 // Нажать — картинка целиком в новой вкладке.
 function renderFigures(figures) {
@@ -1921,6 +2031,7 @@ async function ask(question) {
     if (/модел/i.test(error)) loadBotStatus();  // сервер модели молчит — обновить строку состояния
   }
   const used = done ? done.used : [];
+  if (done && done.articles && done.articles.length) bot.append(renderArticles(bot, done.articles));
   if (figures.length) bot.append(renderFigures(figures));
   if (sources.length && !general) {
     bot.append(renderGraphLinks(bot, sources, used));

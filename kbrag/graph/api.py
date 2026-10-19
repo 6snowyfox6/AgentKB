@@ -22,6 +22,7 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from typing import Any
 
+from .. import acl
 from ..index.db import in_kb
 from ..text import name_key, normalize
 from . import autosyn, store
@@ -287,7 +288,7 @@ def _proper(name: str, common: set[str] | frozenset[str] = frozenset()) -> bool:
 
 # Готовый граф — на каждый узел дерева баз отдельно (ключ — путь, "" — всё дерево):
 # у узла свой словарь синонимов и свои статьи. Самые давние узлы забываются.
-_CACHE: dict[str, dict[str, Any]] = {}
+_CACHE: dict[tuple[str, Any], dict[str, Any]] = {}  # (база, доступ)
 _CACHE_LOCK = threading.Lock()
 CACHE_NODES = 16
 
@@ -357,7 +358,7 @@ def graph(conn: Any, syn: Synonyms, kb: str = "") -> Graph:
         (sorted(syn.names.items()), sorted(syn.relations.items()), sorted(syn.inverse.items()))
     )
     with _CACHE_LOCK:
-        slot = _CACHE.get(kb) or {}
+        slot = _CACHE.get(acl.cache_key(kb)) or {}
         cached: Graph | None = slot.get("graph") if slot.get("words") == words else None
         old = slot.get("stamp")
     if cached is not None and old == stamp:
@@ -374,8 +375,8 @@ def graph(conn: Any, syn: Synonyms, kb: str = "") -> Graph:
     else:
         g = Graph(store.all_facts(conn, upto=last, kb=kb), syn)
     with _CACHE_LOCK:
-        _CACHE.pop(kb, None)  # в конец: самые давние — в начале словаря
-        _CACHE[kb] = {"words": words, "stamp": stamp, "graph": g}
+        _CACHE.pop(acl.cache_key(kb), None)  # в конец: самые давние — в начале словаря
+        _CACHE[acl.cache_key(kb)] = {"words": words, "stamp": stamp, "graph": g}
         while len(_CACHE) > CACHE_NODES:
             _CACHE.pop(next(iter(_CACHE)))
     return g

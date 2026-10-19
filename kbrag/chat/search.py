@@ -11,6 +11,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from typing import Any
 
+from .. import acl
 from ..index import db
 from ..index.search import RRF_K, hybrid_search
 from .plan import Part, Plan
@@ -115,7 +116,8 @@ def search_all(conn: Any, embedder: Any, queries: list[str], kb: str = "") -> li
             )
 
     with ThreadPoolExecutor(min(SEARCH_WORKERS, len(queries))) as pool:
-        return list(pool.map(one, zip(queries, vectors, strict=True)))
+        # Область доступа запроса (acl.py) — с собой в каждый поток.
+        return list(pool.map(acl.carry(one), zip(queries, vectors, strict=True)))
 
 
 def merged_search(

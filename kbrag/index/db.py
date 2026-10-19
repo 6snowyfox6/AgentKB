@@ -310,16 +310,41 @@ def init_db(conn: Any, dim: int = VECTOR_DIM, with_hnsw: bool = True) -> None:
 #  Дерево баз: в каких ветках лежит статья
 # --------------------------------------------------------------------------- #
 def in_kb(kb: str, doc: str = "d.doc_id") -> tuple[str, dict[str, Any]]:
-    """Условие «статья doc — в поддереве узла kb» для WHERE (с AND впереди) и его
-    параметр. Пустой путь — корень: всё дерево, без условия — и статьи, ещё не
-    разложенные по веткам, тоже видны."""
+    """Условие «статья doc — в поддереве узла kb и видна тому, кто спрашивает» для WHERE
+    (с AND впереди) и его параметры. Пустой путь — корень: всё дерево, и статьи, ещё не
+    разложенные по веткам, — тоже. Кому что видно — acl.py: у человека с ограниченным
+    доступом к условию добавляются его ветки."""
+    from .. import acl
+
+    rights, rights_params = acl.sql(doc)
     if not kb:
-        return "", {}
+        return rights, rights_params
     return (
         f" AND EXISTS (SELECT 1 FROM document_kbs dk WHERE dk.doc_id = {doc}"
-        " AND dk.path <@ %(kb)s::ltree)",
-        {"kb": kb},
+        " AND dk.path <@ %(kb)s::ltree)" + rights,
+        {"kb": kb, **rights_params},
     )
+
+
+def visible_doc(conn: Any, doc_id: str) -> bool:
+    """Видна ли статья тому, кто спрашивает (acl.py): для адресов по doc_id и chunk_id."""
+    from .. import acl
+
+    if acl.current() is None:
+        return True
+    where, params = in_kb("", "d.doc_id")
+    with conn.cursor() as cur:
+        cur.execute(
+            f"SELECT 1 FROM documents d WHERE d.doc_id = %(doc)s{where}", {**params, "doc": doc_id}
+        )
+        return cur.fetchone() is not None
+
+
+def doc_of_chunk(conn: Any, chunk_id: int) -> str | None:
+    with conn.cursor() as cur:
+        cur.execute("SELECT doc_id FROM chunks WHERE id = %s", (chunk_id,))
+        row = cur.fetchone()
+    return str(row[0]) if row else None
 
 
 def ensure_kb(conn: Any, path: str, title: str = "") -> None:
@@ -362,15 +387,22 @@ def unassign(conn: Any, doc_ids: list[str], path: str) -> int:
 
 
 def kb_nodes(conn: Any) -> list[dict[str, Any]]:
-    """Узлы дерева баз со счётом статей: своих (лежат в самом узле) и всего в поддереве."""
+    """Узлы дерева баз со счётом статей: своих (лежат в самом узле) и всего в поддереве.
+    Счёт — только видимых тому, кто спрашивает (acl.py): чужие статьи не видны и числом."""
+    from .. import acl
+
+    rights, params = acl.sql("dk.doc_id")
     with conn.cursor() as cur:
-        cur.execute("""
+        cur.execute(
+            f"""
             SELECT k.path::text, k.title,
-                   (SELECT count(*) FROM document_kbs dk WHERE dk.path = k.path),
+                   (SELECT count(*) FROM document_kbs dk WHERE dk.path = k.path{rights}),
                    (SELECT count(DISTINCT dk.doc_id) FROM document_kbs dk
-                     WHERE dk.path <@ k.path)
+                     WHERE dk.path <@ k.path{rights})
             FROM kbs k ORDER BY k.path
-            """)
+            """,
+            params or None,
+        )
         return [
             {"path": r[0], "title": r[1] or "", "own": int(r[2]), "subtree": int(r[3])}
             for r in cur.fetchall()
@@ -378,7 +410,12 @@ def kb_nodes(conn: Any) -> list[dict[str, Any]]:
 
 
 def unplaced(conn: Any) -> int:
-    """Сколько статей не лежит ни в одной ветке (их видит только всё дерево)."""
+    """Сколько статей не лежит ни в одной ветке (их видит только всё дерево — и только
+    тот, у кого доступ ко всему)."""
+    from .. import acl
+
+    if acl.current() is not None:
+        return 0
     with conn.cursor() as cur:
         cur.execute(
             "SELECT count(*) FROM documents d WHERE NOT EXISTS "
@@ -473,43 +510,91 @@ def upsert_document(conn: Any, record: dict[str, Any]) -> None:
         )
 
 
+def chunk_print(text: str) -> str:
+    """Отпечаток текста фрагмента: пометка формул $$…$$ (index/formulas.py) и пробелы —
+    не изменение текста."""
+    return " ".join((text or "").replace("$$", "").split())
+
+
+def match_chunks(
+    old: list[tuple[int, int, str]], rows: list[dict[str, Any]]
+) -> list[tuple[int | None, bool]]:
+    """Новые фрагменты статьи → прежние (id, ord, текст): на каждый новый — id прежнего
+    фрагмента, чью строку он займёт, и тот ли у него текст.
+
+    Сначала — по тексту: фрагмент с тем же текстом остаётся тем же фрагментом, куда бы
+    он ни сдвинулся (новый абзац в начале статьи сдвигает номера всех остальных). Из
+    одинаковых текстов — ближайший по номеру. Не нашёлся по тексту — прежний фрагмент на
+    том же месте, если его не забрал никто (текст поправлен: id тот же, факты — заново).
+    Иначе — новый фрагмент."""
+    by_print: dict[str, list[tuple[int, int]]] = {}
+    by_ord: dict[int, int] = {}
+    for chunk_id, ord_, text in old:
+        by_print.setdefault(chunk_print(text), []).append((ord_, chunk_id))
+        by_ord[ord_] = chunk_id
+    used: set[int] = set()
+    plan: list[tuple[int | None, bool]] = [(None, False)] * len(rows)
+    for i, row in enumerate(rows):
+        free = [(o, c) for o, c in by_print.get(chunk_print(row["text"]), []) if c not in used]
+        if free:
+            _, chunk_id = min(free, key=lambda oc: (abs(oc[0] - int(row["ord"])), oc[0]))
+            used.add(chunk_id)
+            plan[i] = (chunk_id, True)
+    for i, row in enumerate(rows):
+        same_place = by_ord.get(int(row["ord"]))
+        if plan[i][0] is None and same_place is not None and same_place not in used:
+            used.add(same_place)
+            plan[i] = (same_place, False)
+    return plan
+
+
 def replace_chunks(conn: Any, doc_id: str, rows: list[dict[str, Any]]) -> int:
     """Чанки документа пишутся целиком: переиндексация не должна плодить дубли.
 
-    Строки обновляются на месте по (doc_id, ord), а не удаляются и вставляются
-    заново: так у фрагмента остаётся прежний id, и факты графа, которые на него
-    ссылаются, не пропадают каскадом. Раньше `ingest --force` молча стирал весь
-    граф, и модели приходилось проходить все статьи заново. Факты стираются только
-    у фрагментов, чей текст поменялся, — их модель пройдёт заново сама.
+    Прежние строки обновляются на месте, а не удаляются и вставляются заново: так у
+    фрагмента остаётся прежний id, и факты графа, которые на него ссылаются, не
+    пропадают каскадом. Какой новый фрагмент займёт какую строку — по тексту
+    (match_chunks): переразбор (новый docling, OCR, другая нарезка) сдвигает номера, и
+    сравнение по номеру стирало факты всей статьи. Факты стираются только у фрагментов,
+    чей текст правда поменялся, — их модель пройдёт заново сама; фрагменты, которых
+    больше нет, уходят вместе со своими фактами.
     """
     with conn.cursor() as cur:
-        cur.execute("SELECT ord, id, text FROM chunks WHERE doc_id = %s", (doc_id,))
-        old = {r[0]: (r[1], r[2]) for r in cur.fetchall() or []}
+        cur.execute("SELECT id, ord, text FROM chunks WHERE doc_id = %s", (doc_id,))
+        old = [(int(r[0]), int(r[1]), str(r[2] or "")) for r in cur.fetchall() or []]
+        plan = match_chunks(old, rows)
+        if old:
+            # Номера освобождаются: (doc_id, ord) уникален, а фрагменты меняются местами.
+            cur.execute("UPDATE chunks SET ord = -1 - ord WHERE doc_id = %s", (doc_id,))
         changed = []
-        for row in rows:
+        for row, (chunk_id, same) in zip(rows, plan, strict=True):
+            values = {"language": None, **row}
+            if chunk_id is None:
+                cur.execute(
+                    """
+                    INSERT INTO chunks (doc_id, ord, text, headings, pages, n_tokens,
+                                        has_table, embedding, language)
+                    VALUES (%(doc_id)s, %(ord)s, %(text)s, %(headings)s, %(pages)s,
+                            %(n_tokens)s, %(has_table)s, %(embedding)s::vector, %(language)s)
+                    """,
+                    values,
+                )
+                continue
             cur.execute(
                 """
-                INSERT INTO chunks (doc_id, ord, text, headings, pages, n_tokens,
-                                    has_table, embedding, language)
-                VALUES (%(doc_id)s, %(ord)s, %(text)s, %(headings)s, %(pages)s,
-                        %(n_tokens)s, %(has_table)s, %(embedding)s::vector, %(language)s)
-                ON CONFLICT (doc_id, ord) DO UPDATE SET
-                    text = EXCLUDED.text, headings = EXCLUDED.headings,
-                    pages = EXCLUDED.pages, n_tokens = EXCLUDED.n_tokens,
-                    has_table = EXCLUDED.has_table, embedding = EXCLUDED.embedding,
-                    language = EXCLUDED.language
+                UPDATE chunks SET ord = %(ord)s, text = %(text)s, headings = %(headings)s,
+                    pages = %(pages)s, n_tokens = %(n_tokens)s, has_table = %(has_table)s,
+                    embedding = %(embedding)s::vector, language = %(language)s
+                WHERE id = %(chunk_id)s
                 """,
-                {"language": None, **row},
+                {**values, "chunk_id": chunk_id},
             )
-            before = old.get(row["ord"])
-            # Пометка формул $$…$$ (index/formulas.py) — не изменение текста: факты графа
-            # у такого фрагмента остаются.
-            if before and before[1].replace("$$", "") != row["text"].replace("$$", ""):
-                changed.append(before[0])
-        cur.execute(
-            "DELETE FROM chunks WHERE doc_id = %s AND NOT (ord = ANY(%s))",
-            (doc_id, [row["ord"] for row in rows]),
-        )
+            if not same:
+                changed.append(chunk_id)
+        kept = {chunk_id for chunk_id, _ in plan if chunk_id is not None}
+        gone = [chunk_id for chunk_id, _, _ in old if chunk_id not in kept]
+        if gone:
+            cur.execute("DELETE FROM chunks WHERE id = ANY(%s)", (gone,))
         if changed:
             cur.execute("SELECT to_regclass('facts') IS NOT NULL")
             found = cur.fetchone()
@@ -715,15 +800,26 @@ def document(conn: Any, doc_id: str) -> dict[str, Any] | None:
     return out
 
 
-def document_chunks(conn: Any, doc_id: str) -> list[dict[str, Any]]:
-    """Разобранная статья по порядку — то, что получилось из PDF."""
+def chunk_count(conn: Any, doc_id: str) -> int:
+    with conn.cursor() as cur:
+        cur.execute("SELECT count(*) FROM chunks WHERE doc_id = %s", (doc_id,))
+        row = cur.fetchone()
+    return int(row[0]) if row else 0
+
+
+def document_chunks(
+    conn: Any, doc_id: str, offset: int = 0, limit: int | None = None
+) -> list[dict[str, Any]]:
+    """Разобранная статья по порядку — то, что получилось из PDF; offset и limit — часть
+    фрагментов (статья по страницам: /api/article, MCP get_article)."""
     with conn.cursor() as cur:
         cur.execute(
             """
             SELECT c.ord, c.text, c.headings, c.pages, c.n_tokens, c.has_table
             FROM chunks c WHERE c.doc_id = %s ORDER BY c.ord
+            OFFSET %s LIMIT %s
             """,
-            (doc_id,),
+            (doc_id, max(0, offset), limit),
         )
         return [
             {

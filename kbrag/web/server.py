@@ -34,11 +34,13 @@ import json
 import sys
 import traceback
 from dataclasses import replace
+from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, quote, urlparse
 
+from .. import acl
 from ..chat import answer as chat
 from ..chat.settings import Settings
 from ..common import add_db_args, add_embedder_args, add_llm_args, kb_from_args
@@ -117,22 +119,100 @@ class Handler(BaseHTTPRequestHandler):
             "application/json; charset=utf-8",
         )
 
+    # -- кто спрашивает и что ему видно (acl.py) -------------------------------- #
+    def _token(self, query: dict[str, Any] | None = None) -> str:
+        """Токен входа: заголовок X-KBRAG-Token (MCP), cookie страницы или ?token=."""
+        header = (self.headers.get("X-KBRAG-Token") or "").strip()
+        if header:
+            return header
+        jar = SimpleCookie(self.headers.get("Cookie") or "")
+        if COOKIE in jar:
+            return str(jar[COOKIE].value)
+        return str(((query or {}).get("token") or [""])[0])
+
+    def _scope(self, query: dict[str, Any] | None = None) -> tuple[bool, acl.Scope]:
+        """(пускать ли, область). Без .local/access.yaml — всех и ко всему, как раньше;
+        с ним — только по токену, и только к веткам человека. Файл с ошибкой — никого."""
+        try:
+            access = acl.load()
+        except acl.AccessError as exc:
+            print(f"Доступ: {exc} — никого не пускаю, пока файл не поправят", file=sys.stderr)
+            return False, ()
+        if not access.configured:
+            return True, None
+        person = access.by_token(self._token(query))
+        return (True, person.bases) if person else (False, ())
+
+    def _deny(self) -> None:
+        self._json(
+            {
+                "error": "нужен вход: токен выдаёт владелец базы (python kbrag.py access add)",
+                "login": True,
+            },
+            401,
+        )
+
+    def _kb_for(self, asked: Any) -> str:
+        """База запроса — та, что видна человеку. Не задана — с которой запущен сервер, а
+        если её не видно — всё дерево (ветки человека). Чужая — KBError."""
+        if asked is None:
+            kb = State.kb(None)
+            return kb if acl.visible(kb) else ""
+        kb = State.kb(asked)
+        if not acl.visible(kb):
+            raise KBError(f"нет доступа к базе «{kb or 'всё дерево'}»")
+        return kb
+
+    def _hidden(self, path: str, query: dict[str, Any]) -> bool:
+        """Адрес о конкретной статье (doc_id, chunk_id, id формулы или рисунка) — а статья
+        не видна человеку: ответ 404, как будто её нет. True — ответ уже отправлен."""
+        if acl.current() is None:
+            return False
+        doc_id = (query.get("doc_id") or [""])[0]
+        raw = (query.get("chunk_id") or query.get("id") or [""])[0]
+        with db.connect(State.dsn) as conn:
+            if not doc_id and raw.isdigit():
+                if path == "/api/fragment":
+                    doc_id = db.doc_of_chunk(conn, int(raw)) or ""
+                elif path in ("/api/formula_image", "/api/figure"):
+                    from ..index import figures, formulas
+
+                    table = formulas if path == "/api/formula_image" else figures
+                    item = table.by_id(conn, int(raw))
+                    doc_id = str(item["doc_id"]) if item else ""
+            if not doc_id or db.visible_doc(conn, doc_id):
+                return False
+        self._json({"error": "нет такой статьи"}, 404)
+        return True
+
     def do_GET(self) -> None:  # noqa: N802 — имя задано базовым классом
         route = urlparse(self.path)
         query = parse_qs(route.query)
+        if route.path == "/":
+            self._send(200, PAGE.read_bytes(), "text/html; charset=utf-8")
+            return
+        if route.path.startswith("/static/"):
+            self._static(route.path[len("/static/") :])
+            return
+        allowed, scope = self._scope(query)
+        if not allowed:
+            self._deny()
+            return
+        with acl.scoped(scope):
+            self._get(route, query)
 
+    def _get(self, route: Any, query: dict[str, Any]) -> None:
         try:
             asked = query.get("kb")
-            kb = State.kb(asked[0] if asked else None)
+            kb = self._kb_for(asked[0] if asked else None)
         except KBError as exc:
-            self._json({"error": f"база: {exc}"}, 400)
+            code = 403 if "нет доступа" in str(exc) else 400
+            self._json({"error": f"база: {exc}"}, code)
             return
         try:
-            if route.path == "/":
-                self._send(200, PAGE.read_bytes(), "text/html; charset=utf-8")
-            elif route.path.startswith("/static/"):
-                self._static(route.path[len("/static/") :])
-            elif route.path == "/api/stats":
+            if route.path in BY_DOCUMENT and self._hidden(route.path, query):
+                return
+            if route.path == "/api/stats":
                 self._json(self._stats(kb))
             elif route.path == "/api/kbs":
                 self._json(self._kbs(kb))
@@ -173,6 +253,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._figure(query)
             elif route.path == "/api/figures":
                 self._figures(query, kb)
+            elif route.path == "/api/pdf":
+                self._pdf(query)
             else:
                 self._json({"error": "нет такой страницы"}, 404)
         except (ConnectionAbortedError, ConnectionResetError, BrokenPipeError):
@@ -183,6 +265,14 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802
         route = urlparse(self.path)
+        allowed, scope = self._scope()
+        if not allowed:
+            self._deny()
+            return
+        with acl.scoped(scope):
+            self._post(route)
+
+    def _post(self, route: Any) -> None:
         try:
             if route.path not in ("/api/chat", "/api/dataset"):
                 self._json({"error": "нет такого адреса"}, 404)
@@ -198,9 +288,10 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"error": "тело запроса — не JSON", "detail": str(exc)}, 400)
                 return
             try:
-                kb = State.kb(payload.pop("kb", None))
+                kb = self._kb_for(payload.pop("kb", None))
             except KBError as exc:
-                self._json({"error": f"база: {exc}"}, 400)
+                code = 403 if "нет доступа" in str(exc) else 400
+                self._json({"error": f"база: {exc}"}, code)
                 return
             if route.path == "/api/chat":
                 self._chat(payload, kb)
@@ -305,9 +396,12 @@ class Handler(BaseHTTPRequestHandler):
             tree = nodes()
         base = get_kb(kb)
         examples = base.settings.get("примеры_вопросов") or []
+        server_kb = State.chat_settings.kb
         return {
             **tree,
-            "server": State.chat_settings.kb,  # с какой базой запущен сервер (--kb)
+            # Базы по умолчанию и сервера, к которым у человека нет доступа, — не называются.
+            "default": tree["default"] if acl.visible(tree["default"]) else "",
+            "server": server_kb if acl.visible(server_kb) else "",  # с какой запущен (--kb)
             "current": kb,
             "title": base.title,
             "examples": [str(x) for x in examples if str(x).strip()][:8],
@@ -324,13 +418,28 @@ class Handler(BaseHTTPRequestHandler):
 
     # -- статья, фрагмент, формулы, рисунки (их берёт и MCP-сервер, kbrag/mcp.py) -- #
     def _article(self, query: dict[str, Any]) -> None:
-        """Статья: метаданные, ветки, рисунки, формулы; с text=1 — и фрагменты по порядку."""
+        """Статья: метаданные, ветки, рисунки, формулы; с text=1 — и фрагменты по порядку,
+        по страницам: offset — с какого фрагмента, limit — сколько (ARTICLE_PAGE, не больше
+        ARTICLE_PAGE_MAX) и не больше ARTICLE_CHARS знаков. Целиком статья в 30 страниц —
+        30–40 тыс. токенов: ответ инструмента MCP столько не вмещает."""
         from ..library import objects
 
         doc_id = (query.get("doc_id") or [""])[0]
+        page: dict[str, Any] = {}
         with db.connect(State.dsn) as conn:
             found = db.document(conn, doc_id)
-            chunks = db.document_chunks(conn, doc_id) if found and _flag(query, "text") else None
+            if found and _flag(query, "text"):
+                offset = _int_arg(query, "offset", 0, 0, 1_000_000)
+                limit = _int_arg(query, "limit", ARTICLE_PAGE, 1, ARTICLE_PAGE_MAX)
+                chunks = _fit_chars(db.document_chunks(conn, doc_id, offset, limit))
+                total = db.chunk_count(conn, doc_id)
+                after = offset + len(chunks)
+                page = {
+                    "fragments": chunks,
+                    "fragments_total": total,
+                    "offset": offset,
+                    "next_offset": after if after < total else None,
+                }
         if found is None:
             self._json({"error": f"статьи «{doc_id}» в базе нет"}, 404)
             return
@@ -340,8 +449,7 @@ class Handler(BaseHTTPRequestHandler):
             figures=objects.figures(doc_id),
             formulas=len(objects.formulas(doc_id)),
         )
-        if chunks is not None:
-            found["fragments"] = chunks
+        found.update(page)
         self._json(found)
 
     def _fragment(self, query: dict[str, Any]) -> None:
@@ -391,11 +499,9 @@ class Handler(BaseHTTPRequestHandler):
         if not text:
             self._json({"error": "нужен запрос q — что за формула"}, 400)
             return
-        limit = (query.get("limit") or ["10"])[0]
+        limit = _int_arg(query, "limit", 10, 1, OBJECTS_MAX)
         with db.connect(State.dsn) as conn:
-            found = formulas.search(
-                conn, State.embedder, text, kb, int(limit) if limit.isdigit() else 10
-            )
+            found = formulas.search(conn, State.embedder, text, kb, limit)
         self._json({"query": text, "kb": kb, "formulas": found})
 
     def _formula_image(self, query: dict[str, Any]) -> None:
@@ -451,6 +557,24 @@ class Handler(BaseHTTPRequestHandler):
         kind = {".jpg": "image/jpeg", ".jpeg": "image/jpeg"}.get(path.suffix.lower(), "image/png")
         self._send(200, path.read_bytes(), kind)
 
+    def _pdf(self, query: dict[str, Any]) -> None:
+        """Свой PDF статьи — открыть в браузере (адрес с #page=N — на этой странице)."""
+        from ..chat.references import pdf_path
+
+        doc_id = (query.get("doc_id") or [""])[0]
+        path = pdf_path(doc_id) if doc_id else None
+        if path is None:
+            self._json({"error": f"PDF статьи «{doc_id}» на этом компьютере нет"}, 404)
+            return
+        body = path.read_bytes()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/pdf")
+        self.send_header("Content-Length", str(len(body)))
+        name = quote(path.name)
+        self.send_header("Content-Disposition", f"inline; filename*=UTF-8''{name}")
+        self.end_headers()
+        self.wfile.write(body)
+
     def _figures(self, query: dict[str, Any], kb: str) -> None:
         """Рисунки по смыслу — по подписи и описанию, в поддереве базы kb."""
         from ..index import figures
@@ -459,11 +583,9 @@ class Handler(BaseHTTPRequestHandler):
         if not text:
             self._json({"error": "нужен запрос q — что на рисунке"}, 400)
             return
-        limit = (query.get("limit") or ["10"])[0]
+        limit = _int_arg(query, "limit", 10, 1, OBJECTS_MAX)
         with db.connect(State.dsn) as conn:
-            found = figures.search(
-                conn, State.embedder, text, kb, int(limit) if limit.isdigit() else 10
-            )
+            found = figures.search(conn, State.embedder, text, kb, limit)
         self._json({"query": text, "kb": kb, "figures": found})
 
     def _stats(self, kb: str) -> dict[str, Any]:
@@ -505,9 +627,9 @@ class Handler(BaseHTTPRequestHandler):
                 conn,
                 State.embedder,
                 text,
-                limit=number("limit", 10),
+                limit=_int_arg(query, "limit", 10, 1, SEARCH_MAX),
                 year_from=number("year_from"),
-                max_per_doc=number("per_doc", 2),
+                max_per_doc=_int_arg(query, "per_doc", 2, 0, SEARCH_MAX),
                 min_similarity=fraction("min_similarity"),
                 require_words=(query.get("require_words") or [""])[0] == "1",
                 alternatives=also,
@@ -548,6 +670,45 @@ def formulas_numbers(doc_id: str) -> list[str]:
     with db.connect(State.dsn) as conn:
         found = formulas.of_document(conn, doc_id)
     return [str(f["number"]) for f in found if f.get("number")]
+
+
+COOKIE = "kbrag_token"  # вход страницы (acl.py): токен в cookie — его шлют и картинки
+# Адреса о конкретной статье — по doc_id, chunk_id или id формулы, рисунка: у них права
+# проверяются по самой статье (Handler._hidden).
+BY_DOCUMENT = {
+    "/api/document",
+    "/api/article",
+    "/api/fragment",
+    "/api/formula",
+    "/api/formula_image",
+    "/api/figure",
+    "/api/pdf",
+}
+
+ARTICLE_PAGE = 20  # фрагментов статьи на страницу (MCP get_article)
+ARTICLE_PAGE_MAX = 50
+ARTICLE_CHARS = 60_000  # знаков на страницу: ~15–20 тыс. токенов, ответ MCP их вмещает
+SEARCH_MAX = 100  # фрагментов в выдаче поиска
+OBJECTS_MAX = 50  # формул или рисунков в выдаче поиска по смыслу
+
+
+def _int_arg(query: dict[str, Any], name: str, default: int, low: int, high: int) -> int:
+    """Целое из адреса — в пределах [low, high]; не число — default."""
+    raw = (query.get(name) or [""])[0].strip()
+    value = int(raw) if raw.lstrip("-").isdigit() else default
+    return min(max(value, low), high)
+
+
+def _fit_chars(chunks: list[dict[str, Any]], budget: int = ARTICLE_CHARS) -> list[dict[str, Any]]:
+    """Фрагменты подряд, пока их текст в пределах budget знаков; первый — всегда."""
+    out: list[dict[str, Any]] = []
+    used = 0
+    for chunk in chunks:
+        used += len(chunk.get("text") or "")
+        if out and used > budget:
+            break
+        out.append(chunk)
+    return out
 
 
 def _flag(query: dict[str, Any], name: str) -> bool:

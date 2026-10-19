@@ -66,6 +66,8 @@ r"""KBRAG — один вход для всех действий.
     eval --questions .local/kbs/<база>/eval-graph.yaml   по вопросам из графа (questions)
     formula ID (55)             формула статьи по номеру: LaTeX, словами, где на неё ссылаются
     formula --find "…"          формулы по смыслу (--kb — в какой базе, --json — в stdout)
+    access                      кто к каким базам: access add ИМЯ --kb ВЕТКА [--telegram ID]
+                                (токен входа — сразу), access list, remove, token, guests
     summaries                   резюме статей и разделов, которых нет (пишет модель; --redo —
                                 заново; "doc_id" --show — показать)
     figure ID 3                 рисунок статьи «Рис. 3»: файл, подпись, описание, кто ссылается
@@ -763,6 +765,7 @@ class Passthrough:
 
 PASSTHROUGH = {
     "kb": Passthrough("kbrag.kbtree", default=("list",), no_database=("list",)),
+    "access": Passthrough("kbrag.acl", database=False, default=("list",)),
     "summaries": Passthrough("kbrag.index.summaries", llm=True),
     "formula": Passthrough("kbrag.index.formulas"),
     "figure": Passthrough("kbrag.index.figures"),

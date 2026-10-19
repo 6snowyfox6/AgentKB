@@ -7,6 +7,7 @@ import time
 from dataclasses import replace
 from typing import Any
 
+from .. import acl
 from . import ui
 from .api import TelegramError
 from .base import EDIT_EVERY, HISTORY_TURNS, KEEP, BotBase, Session
@@ -28,8 +29,12 @@ class AnswersMixin(BotBase):
         session.stop.clear()
         args = (chat_id, session, text, history)
         if self.background:
+            # Доступ человека (acl.py) — с собой в поток ответа.
             worker = threading.Thread(
-                target=self._answer_safe, args=args, name=f"tg-answer-{chat_id}", daemon=True
+                target=acl.carry(self._answer_safe),
+                args=args,
+                name=f"tg-answer-{chat_id}",
+                daemon=True,
             )
             self.workers[chat_id] = worker
             worker.start()
@@ -155,6 +160,7 @@ class AnswersMixin(BotBase):
             "history": history,
             "info": info,
             "used": done.get("used"),
+            "articles": done.get("articles") or [],
             "mode": done.get("mode"),
             "model": done.get("model"),
             "seconds": done.get("seconds"),
@@ -164,7 +170,7 @@ class AnswersMixin(BotBase):
         while len(session.answers) > KEEP:
             session.answers.pop(next(iter(session.answers)))
 
-        markup = ui.answer_keyboard(aid, sources)
+        markup = ui.answer_keyboard(aid, sources, done.get("articles"))
         pieces = split(ui.answer_text(answer, general, sources, done))
         try:
             self._deliver(chat_id, mid, pieces, markup)

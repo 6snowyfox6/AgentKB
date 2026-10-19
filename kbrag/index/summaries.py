@@ -295,14 +295,17 @@ def after_ingest(
 # --------------------------------------------------------------------------- #
 #  Поиск
 # --------------------------------------------------------------------------- #
-_CACHE: dict[str, tuple[float, bool]] = {}
+_CACHE: dict[tuple[str, Any], tuple[float, bool]] = {}  # (база, доступ)
 CACHE_SEC = 300.0
 
 
 def available(conn: Any, kb: str = "") -> bool:
     """Есть ли в поддереве kb резюме статей (иначе поиск сверху вниз не нужен)."""
     now = time.monotonic()
-    cached = _CACHE.get(kb)
+    from .. import acl
+
+    key = acl.cache_key(kb)
+    cached = _CACHE.get(key)
     if cached and now - cached[0] < CACHE_SEC:
         return cached[1]
     clause, params = db.in_kb(kb, "s.doc_id")
@@ -314,7 +317,7 @@ def available(conn: Any, kb: str = "") -> bool:
             found = cur.fetchone() is not None
     except Exception:  # noqa: BLE001 — таблицы нет (база до резюме)
         found = False
-    _CACHE[kb] = (now, found)
+    _CACHE[key] = (now, found)
     return found
 
 

@@ -128,7 +128,7 @@ def test_tools_ask_server(served: list[str]) -> None:
         "/api/search?q=%D1%80%D1%83%D0%B4%D0%BD%D1%8B%D0%B5+%D1%83%D0%B7%D0%BB%D1%8B&kb=geology.ore&limit=10&per_doc=2",
         "/api/search?q=x&kb=.&limit=10&per_doc=2",
         "/api/fragment?chunk_id=5",
-        "/api/article?doc_id=d1&text=1",
+        "/api/article?doc_id=d1&text=1&offset=0&limit=20",
         "/api/dataset?name=%D0%90%D0%BD%D0%B0%D0%B1%D0%B0%D1%80%D1%81%D0%BA%D0%B8%D0%B9+%D1%89%D0%B8%D1%82",
         "/api/datasets",
         "/api/formula?doc_id=d1&number=55",

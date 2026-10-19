@@ -6,6 +6,7 @@ import re
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
+from .. import acl
 from .messages import fragment_block
 from .settings import Settings
 
@@ -118,7 +119,7 @@ def find_conflicts(
     if not pairs:
         return []
     with ThreadPoolExecutor(min(4, len(pairs))) as pool:
-        verdicts = list(pool.map(differ, pairs))
+        verdicts = list(pool.map(acl.carry(differ), pairs))
     return [
         {"a": a["n"], "b": b["n"], "said_a": said[a["n"]], "said_b": said[b["n"]]}
         for (a, b), clash in zip(pairs, verdicts, strict=True)

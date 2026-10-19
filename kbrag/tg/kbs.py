@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from .. import acl
 from ..kb import KBError
 from ..kb import get as get_kb
 from . import ui
@@ -51,6 +52,9 @@ class KbsMixin(BotBase):
         except KBError as exc:
             self.tg.send(chat_id, esc(str(exc)))
             return "Нет такой базы"
+        if not acl.visible(path):
+            self.tg.send(chat_id, f"Нет доступа к базе «{esc(path)}».")
+            return "Нет доступа"
         self.choose_kb(chat_id, path)
         session.history.clear()
         session.sources = []
