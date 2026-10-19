@@ -1,0 +1,2042 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>KBRAG — база знаний</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=PT+Serif:wght@700&display=swap">
+<style>
+  :root {
+    --ground: #F6F3EE;
+    --surface: #FFFDFA;
+    --sunken: #EFEBE3;
+    --ink: #221F1A;
+    --muted: #6B635A;
+    --rule: #D6CFC3;
+    --gpu: #B04A2A;
+    --llm: #1F5F5D;
+    --db: #3B4A7A;
+    --k-doc: #8C8377;
+    --k-obj: #9A7B3F;
+    --k-min: #7B4F8C;
+    --k-proc: #6B7A2E;
+    --k-set: #2E2924;
+    --sans: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+    --serif: "PT Serif", Georgia, serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ground: #141310; --surface: #1D1C18; --sunken: #232118;
+      --ink: #EDE8DF; --muted: #A29A8C; --rule: #3B3830;
+      --gpu: #E08A63; --llm: #5FB3AC; --db: #93A2DC;
+      --k-doc: #A79E90; --k-obj: #C9A55E; --k-min: #B58CC6; --k-proc: #AFC06A; --k-set: #EDE2CF;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--ground); color: var(--ink);
+    font-family: var(--sans); font-size: 16px; line-height: 1.55;
+    padding: 40px 16px 80px;
+  }
+  .wrap { max-width: 800px; margin: 0 auto; display: flex; flex-direction: column; gap: 28px; }
+
+  header { display: flex; flex-direction: column; gap: 8px; }
+  h1 { font-family: var(--serif); font-size: 32px; margin: 0; }
+  h2.section { font-family: var(--serif); font-size: 22px; margin: 0; }
+  .stats { color: var(--muted); font-size: 14px; }
+  .kb-pick { display: flex; gap: 8px; align-items: center; font-size: 14px; color: var(--muted); }
+  .kb-pick select { font: inherit; color: var(--ink); max-width: 100%; }
+
+  form { display: flex; flex-direction: column; gap: 12px; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  input[type="search"], textarea {
+    flex: 1 1 320px; min-width: 0; font: inherit; color: var(--ink);
+    background: var(--surface); border: 1px solid var(--rule); border-radius: 8px;
+    padding: 12px 14px;
+  }
+  input:focus-visible, select:focus-visible, button:focus-visible, textarea:focus-visible {
+    outline: 2px solid var(--gpu); outline-offset: 2px;
+  }
+  select {
+    font: inherit; color: var(--ink); background: var(--surface);
+    border: 1px solid var(--rule); border-radius: 8px; padding: 10px 12px;
+  }
+  button {
+    font: inherit; font-weight: 600; cursor: pointer; color: var(--surface);
+    background: var(--ink); border: none; border-radius: 8px; padding: 12px 22px;
+  }
+  button:hover { opacity: 0.88; }
+  button:disabled { opacity: 0.45; cursor: default; }
+  label { font-size: 13px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+
+  .state { color: var(--muted); font-size: 15px; }
+  .error { color: var(--gpu); font-size: 15px; }
+
+  .results { display: flex; flex-direction: column; gap: 14px; list-style: none; padding: 0; margin: 0; }
+  .hit {
+    background: var(--surface); border: 1px solid var(--rule); border-radius: 10px;
+    padding: 16px 18px; display: flex; flex-direction: column; gap: 8px;
+  }
+  .hit h2 { font-family: var(--serif); font-size: 18px; margin: 0; line-height: 1.3; }
+  .hit h2 a { color: inherit; text-decoration: none; border-bottom: 1px solid var(--rule); }
+  .hit h2 a:hover { border-color: currentColor; }
+  .meta { font-size: 13px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 6px 12px; }
+  .snippet { font-size: 15px; margin: 0; }
+  .badge {
+    font-size: 12px; font-weight: 600; border-radius: 999px; padding: 1px 9px;
+    border: 1px solid currentColor;
+  }
+  .badge.both { color: var(--llm); }
+  .badge.vector { color: var(--db); }
+  .badge.text { color: var(--gpu); }
+  .legend { font-size: 13px; color: var(--muted); }
+  label.opt { display: flex; gap: 6px; align-items: center; margin-top: 6px; cursor: pointer; }
+
+  .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--rule); }
+  .tab {
+    font: inherit; font-weight: 500; cursor: pointer; color: var(--muted);
+    background: none; border: none; border-bottom: 2px solid transparent;
+    padding: 8px 14px; border-radius: 0;
+  }
+  .tab[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--gpu); }
+  .tab:hover { color: var(--ink); opacity: 1; }
+  [hidden] { display: none !important; }
+  .panel { display: flex; flex-direction: column; gap: 18px; }
+
+  .docs { display: flex; flex-direction: column; gap: 1px; background: var(--rule);
+          border: 1px solid var(--rule); border-radius: 10px; overflow: hidden; }
+  .doc { background: var(--surface); padding: 14px 18px; display: flex; flex-direction: column; gap: 5px; }
+  .doc .name { font-family: var(--serif); font-size: 16px; line-height: 1.3; }
+  .parsed { display: flex; flex-direction: column; gap: 10px; margin-top: 8px; }
+  .frag { border-left: 2px solid var(--rule); padding: 2px 0 2px 12px; font-size: 14.5px; }
+  .frag .where { font-size: 12px; color: var(--muted); display: block; margin-bottom: 2px; }
+  .frag.here { border-left-color: var(--gpu); background: var(--sunken); border-radius: 0 6px 6px 0;
+               padding: 6px 10px 6px 12px; }
+  .frag.here .where { color: var(--gpu); font-weight: 500; }
+  .open {
+    align-self: flex-start; background: none; color: var(--gpu); border: 1px solid var(--rule);
+    border-radius: 6px; padding: 3px 10px; font-size: 13px; font-weight: 500; cursor: pointer;
+  }
+  .links { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; }
+  .links a { color: var(--muted); font-size: 13px; }
+
+  /* -- чат-бот ------------------------------------------------------------ */
+  .bot-status { font-size: 13px; color: var(--muted); display: flex; gap: 8px; align-items: center; }
+  .bot-status .lamp { width: 9px; height: 9px; border-radius: 50%; background: var(--rule); }
+  .bot-status.ok .lamp { background: var(--llm); }
+  .bot-status.bad { color: var(--gpu); }
+  .bot-status.bad .lamp { background: var(--gpu); }
+  .chat { display: flex; flex-direction: column; gap: 18px; }
+  .msg-user {
+    align-self: flex-end; max-width: 85%; background: var(--sunken); border-radius: 14px 14px 4px 14px;
+    padding: 10px 14px; white-space: pre-wrap;
+  }
+  .msg-bot {
+    background: var(--surface); border: 1px solid var(--rule); border-radius: 12px;
+    padding: 16px 18px; display: flex; flex-direction: column; gap: 12px;
+  }
+  .answer { font-size: 15.5px; }
+  .answer p { margin: 0 0 10px; }
+  .answer p:last-child { margin-bottom: 0; }
+  .answer ul, .answer ol { margin: 0 0 10px; padding-left: 22px; }
+  .answer.typing::after { content: "▍"; color: var(--gpu); animation: blink 1s steps(2) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+  .cite {
+    display: inline-block; font-size: 11.5px; font-weight: 600; line-height: 1; color: var(--gpu);
+    border: 1px solid var(--rule); border-radius: 5px; padding: 2px 5px; margin: 0 1px;
+    vertical-align: 2px; cursor: pointer; background: var(--sunken);
+  }
+  .cite:hover { border-color: var(--gpu); }
+  .cite.bad { color: var(--muted); text-decoration: line-through; cursor: default; }
+  .sources { display: flex; flex-direction: column; gap: 6px; border-top: 1px solid var(--rule); padding-top: 10px; }
+  .sources .sub { font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+  .src { font-size: 14px; display: flex; flex-direction: column; gap: 6px; }
+  .src .head { display: flex; flex-wrap: wrap; gap: 2px 8px; align-items: baseline; cursor: pointer; }
+  .src .num { font-weight: 600; color: var(--gpu); min-width: 26px; }
+  .src.unused .num, .src.unused .title { color: var(--muted); }
+  .src .title { font-family: var(--serif); }
+  .src .where { color: var(--muted); font-size: 13px; white-space: nowrap; }
+  .src .body { margin-left: 34px; display: flex; flex-direction: column; gap: 8px; }
+  .src .text { font-size: 14px; border-left: 3px solid var(--llm); padding: 2px 0 2px 12px; margin: 0; }
+  .src.flash { background: var(--sunken); border-radius: 6px; }
+  .bot-foot { font-size: 12.5px; color: var(--muted); display: flex; gap: 4px 12px; flex-wrap: wrap; }
+  /* Связи графа из процитированных фрагментов: щелчок по имени — узел на графе. */
+  .graph-links { display: flex; flex-direction: column; gap: 4px; font-size: 13.5px;
+                 border-top: 1px solid var(--rule); padding-top: 10px; }
+  .graph-links .sub { font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+  .graph-links .hint { font-size: 12.5px; color: var(--muted); }
+  .gl { display: flex; flex-wrap: wrap; gap: 2px 6px; align-items: baseline; }
+  .gl .n { font-weight: 600; color: var(--gpu); cursor: pointer; min-width: 26px; }
+  .gl button.ent { all: unset; cursor: pointer; color: var(--db); border-bottom: 1px dotted var(--db); }
+  .gl button.ent:hover, .gl button.ent:focus-visible { border-bottom-style: solid; }
+  .gl .rel { color: var(--muted); font-style: italic; }
+  .graph-links details summary { cursor: pointer; color: var(--muted); font-size: 12.5px; }
+  .not-in-base { border: 1px solid var(--gpu); border-radius: 8px; padding: 10px 14px;
+                 display: flex; flex-direction: column; gap: 4px; font-size: 14.5px; }
+  .not-in-base strong { color: var(--gpu); }
+  .answer.general { border-left: 3px dashed var(--rule); padding-left: 14px; color: var(--ink); }
+  .queries { font-size: 13px; color: var(--muted); }
+  .warn { color: var(--gpu); font-size: 14px; }
+  .removed { font-size: 13px; color: var(--muted); }
+  .removed summary { cursor: pointer; }
+  .removed li { margin: 4px 0; }
+  form.ask { flex-direction: row; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
+  .ask textarea { flex: 1 1 200px; width: auto; min-width: 0; resize: vertical; min-height: 52px; max-height: 240px;
+                  line-height: 1.45; }
+  .examples { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip {
+    font-size: 13.5px; border: 1px solid var(--rule); border-radius: 999px;
+    padding: 4px 12px; cursor: pointer; background: var(--surface); color: var(--ink);
+  }
+  .chip:hover { border-color: var(--gpu); }
+  .chip .n { color: var(--muted); }
+  .ghost { background: none; color: var(--muted); border: 1px solid var(--rule); padding: 6px 12px;
+           font-size: 13px; font-weight: 500; }
+
+  /* -- граф связей -------------------------------------------------------- */
+  .graph-head { display: flex; flex-direction: column; gap: 10px; }
+  /* Граф шире колонки текста: подписям нужно место. */
+  .map-box { background: var(--surface); border: 1px solid var(--rule); border-radius: 10px;
+             width: min(1100px, calc(100vw - 32px)); position: relative; left: 50%;
+             transform: translateX(-50%); overflow: hidden; }
+  .map-box canvas { display: block; touch-action: none; cursor: grab; }
+  .map-box canvas.on-node { cursor: pointer; }
+  .net-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 13px; color: var(--muted); }
+  .net-legend label { gap: 5px; cursor: pointer; }
+  .dot { width: 11px; height: 11px; border-radius: 50%; display: inline-block; }
+  .net-tools { position: absolute; right: 10px; top: 10px; display: flex; gap: 4px; z-index: 2; }
+  .net-tools button { font: inherit; font-size: 15px; width: 32px; height: 32px; border-radius: 7px;
+                      border: 1px solid var(--rule); background: var(--surface); color: var(--ink);
+                      cursor: pointer; padding: 0; }
+  #net-search { max-width: 320px; }
+  .net-found { display: flex; flex-direction: column; gap: 1px; max-height: 260px; overflow: auto; }
+  .net-found:empty { display: none; }
+  .net-found button { all: unset; cursor: pointer; padding: 5px 8px; border-radius: 6px; font-size: 14px; }
+  .net-found button:hover, .net-found button:focus-visible { background: var(--sunken); }
+  .net-found .kind { margin-left: 8px; }
+  .map-tip { font-size: 14px; min-height: 22px; color: var(--muted); }
+  #map-detail { display: flex; flex-direction: column; gap: 10px; }
+  #map-detail:empty { display: none; }
+  #map-detail h3 { font-family: var(--serif); font-size: 17px; margin: 0; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chips .chip { font-size: 13px; padding: 2px 10px; background: var(--sunken); }
+  .explain { background: var(--sunken); border-radius: 8px; padding: 10px 12px; font-size: 13.5px; }
+  .explain .why-head { font-weight: 600; margin-bottom: 6px; }
+  .explain blockquote { margin: 6px 0; font-style: italic; }
+  .explain p { margin: 4px 0; color: var(--muted); }
+  .sub { font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+  table.dataset { width: 100%; border-collapse: collapse; font-size: 13.5px; margin: 4px 0 10px; }
+  table.dataset td { border-top: 1px solid var(--rule); padding: 5px 8px 5px 0; vertical-align: top; }
+  table.dataset td.num { white-space: nowrap; color: var(--muted); width: 1%; }
+  table.dataset td.src a { display: block; color: var(--muted); font-size: 12.5px; }
+  table.dataset .group { color: var(--muted); font-size: 12px; }
+  table.dataset button.link { all: unset; cursor: pointer; font-weight: 600; }
+  table.dataset button.link:hover { text-decoration: underline; }
+  table.dataset tr.fact { cursor: pointer; }
+  table.dataset tr.fact:hover td { background: var(--sunken); }
+  table.dataset .rel { color: var(--gpu); }
+  table.dataset .self { font-weight: 600; }
+  table.dataset .part { font-weight: 600; color: var(--muted); }
+  @media (max-width: 640px) { table.dataset td.src { display: none; } }
+  .kind { font-size: 12px; color: var(--muted); }
+  .katex-display { margin: 0.4em 0; overflow-x: auto; overflow-y: hidden; }
+  .figures { display: flex; flex-wrap: wrap; gap: 12px; margin: 10px 0; }
+  .figures figure { margin: 0; flex: 1 1 220px; max-width: 360px; }
+  .figures img { width: 100%; height: auto; border: 1px solid var(--line, #ddd); border-radius: 6px;
+                 background: #fff; }
+  .figures figcaption { font-size: 0.85em; color: var(--muted, #666); margin-top: 4px;
+                        overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3;
+                        -webkit-box-orient: vertical; }
+</style>
+<!-- Формулы $$…$$ — KaTeX 0.16.11, копия в web/static (MIT): без интернета тоже. -->
+<link rel="stylesheet" href="/static/katex/katex.min.css">
+<script defer src="/static/katex/katex.min.js"></script>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1 id="kb-title">База знаний</h1>
+    <label class="kb-pick">База: <select id="kb" aria-label="С какой базой дерева работать">
+      <option value="">загружаю…</option></select></label>
+    <div class="stats" id="stats">загружаю…</div>
+  </header>
+
+  <div class="tabs" role="tablist">
+    <button class="tab" id="tab-search" role="tab" aria-selected="true" aria-controls="panel-search">Поиск</button>
+    <button class="tab" id="tab-docs" role="tab" aria-selected="false" aria-controls="panel-docs">Статьи</button>
+    <button class="tab" id="tab-chat" role="tab" aria-selected="false" aria-controls="panel-chat">Чат-бот</button>
+    <button class="tab" id="tab-graph" role="tab" aria-selected="false" aria-controls="panel-graph">Граф связей</button>
+  </div>
+
+  <!-- ============================== Поиск ============================== -->
+  <div id="panel-search" class="panel" role="tabpanel">
+    <form id="form">
+      <div class="row">
+        <input type="search" id="q" name="q" placeholder="например: методы измерения вязкости расплавов" autofocus>
+        <button type="submit">Искать</button>
+      </div>
+      <div class="row">
+        <label>Показать
+          <select id="limit">
+            <option value="10" selected>10</option>
+            <option value="20">20</option>
+            <option value="40">40</option>
+          </select>
+        </label>
+        <label>Не старше
+          <select id="year_from">
+            <option value="" selected>любой год</option>
+            <option value="2010">2010</option>
+            <option value="2015">2015</option>
+            <option value="2020">2020</option>
+          </select>
+        </label>
+        <label>Строгость
+          <select id="strict">
+            <option value="0">показывать всё</option>
+            <option value="0.45" selected>отсечь непохожее</option>
+            <option value="0.55">только близкое</option>
+            <option value="words">только со словами запроса</option>
+          </select>
+        </label>
+        <label>Кусков из одной статьи
+          <select id="per_doc">
+            <option value="1">1</option>
+            <option value="2" selected>2</option>
+            <option value="0">без ограничения</option>
+          </select>
+        </label>
+      </div>
+    </form>
+
+    <div class="state" id="state">Введите запрос — можно по-русски, английские статьи тоже найдутся.</div>
+    <ul class="results" id="results"></ul>
+    <div class="legend">
+      <strong>Строгость</strong> отсекает «ближайшее, но не по делу»: вектор всегда находит
+      что-нибудь, даже когда в базе нет ничего подходящего. Куски, где буквально есть все слова
+      запроса, проходят порог всегда.
+      <br><br>
+      Подпись у результата говорит, кто его нашёл:
+      <span class="badge vector">вектор</span> — по смыслу,
+      <span class="badge text">текст</span> — по точным словам,
+      <span class="badge both">оба</span> — сошлись оба способа.
+    </div>
+  </div>
+
+  <!-- ============================== Статьи ============================= -->
+  <div id="panel-docs" class="panel" role="tabpanel" hidden>
+    <div class="state" id="docs-state">загружаю список…</div>
+    <div class="docs" id="docs"></div>
+    <p class="legend">Фрагменты — результат разбора PDF: Docling выделил разделы, таблицы
+    и номера страниц, а нарезка поделила текст на куски примерно по 512 токенов. Сами PDF
+    не хранятся: остаются ссылка, отпечаток файла и разобранный текст.</p>
+  </div>
+
+  <!-- ============================== Чат-бот ============================ -->
+  <div id="panel-chat" class="panel" role="tabpanel" hidden>
+    <div class="row" style="justify-content: space-between">
+      <div class="bot-status" id="bot-status"><span class="lamp"></span><span id="bot-status-text">проверяю модель…</span></div>
+      <button type="button" class="ghost" id="chat-new" hidden>Новый разговор</button>
+    </div>
+
+    <div class="chat" id="chat"></div>
+
+    <div class="examples" id="examples" hidden>
+    </div>
+
+    <form id="ask-form" class="ask">
+      <textarea id="ask" rows="2" placeholder="Спросите что-нибудь по статьям базы. Enter — отправить, Shift+Enter — новая строка"></textarea>
+      <button type="submit" id="ask-send">Спросить</button>
+    </form>
+    <label class="legend opt"><input type="checkbox" id="opt-conflicts" checked> Сверять,
+      не расходятся ли статьи — ещё около 4 с до начала ответа</label>
+    <label class="legend opt"><input type="checkbox" id="opt-fast"> Быстрый режим: без разбора
+      вопроса моделью и без сверки — поиск, реранкер и сразу ответ</label>
+    <p class="legend">Чат-бот отвечает <strong>только тем, что нашёл в базе</strong>, и ищет
+    вместе с моделью: Qwen3 разбирает вопрос на части и составляет запросы (по-русски и
+    по-английски), поиск приносит кандидатов с запасом, модель <strong>читает их и берёт
+    только подходящие</strong>, а если чего-то не хватает — ищет ещё, до трёх кругов. Ответ —
+    только по отобранному, после каждого утверждения номер фрагмента —
+    <span class="cite">1</span>; щёлкните номер — откроется фрагмент и статья.
+    Нужно подробно или кратко — так и напишите в вопросе.
+    Если в базе такой информации нет, статьи не показываются: бот так и пишет и отвечает из
+    общих знаний модели — с пометкой, что это не из базы. Граф связей — на своей
+    вкладке.</p>
+  </div>
+
+  <!-- ============================== Граф связей ======================== -->
+  <div id="panel-graph" class="panel" role="tabpanel" hidden>
+    <div class="graph-head">
+      <h2 class="section">Граф связей</h2>
+      <div class="row">
+        <input type="search" id="net-search" placeholder="найти узел: метод, вещество, место…">
+        <button type="button" id="net-find">Найти</button>
+        <label>Узлы
+          <select id="map-min">
+            <option value="1" selected>все</option>
+            <option value="2">от 2 статей</option>
+            <option value="3">от 3 статей</option>
+            <option value="5">от 5 статей</option>
+          </select>
+        </label>
+      </div>
+      <div class="net-found" id="net-found"></div>
+      <div class="state" id="map-state">загружаю…</div>
+    </div>
+    <div class="map-box" id="map-box"></div>
+    <div class="net-legend" id="net-legend"></div>
+    <div class="map-tip" id="map-tip"></div>
+    <div id="map-detail"></div>
+    <p class="legend">Граф знаний — факты, которые <strong>Qwen3 выписала из статей</strong>
+    (правила — config\graph-rules.txt). Узел — то, о чём пишут: место, разлом, метод, процесс,
+    признак; вида у узла нет. <span style="color:var(--gpu)">Рыжая стрелка</span> — факт
+    «от → связь → к», и у каждого есть дословная цитата из статьи: код проверил, что цитата
+    есть в статье и в ней названы оба конца. Серые тонкие линии — из какой статьи узел.
+    Наведите на узел — на стрелках появятся связи; щёлкните — внизу откроется его
+    <strong>все факты о нём</strong> и о том, что в него входит, с цитатами (нажмите
+    строку), таблица для Excel и вопрос чат-боту. Разные написания одного и того же
+    («Donetsk basin» и «Донецкий бассейн») сводит словарь config\synonyms.yaml; предложения
+    для него — python kbrag.py synonyms. Статьи, на которые сослался чат-бот в последнем
+    ответе, обведены рыжим.</p>
+  </div>
+
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+
+// -- формулы ------------------------------------------------------------------- //
+// Формулы во фрагментах лежат между $$…$$ (index/formulas.py) — и в ответе модели тоже.
+// Наблюдатель за страницей рисует их KaTeX'ом, где бы текст ни появился: ответ, пока
+// пишется, источники, поиск, статьи. Пара $$ не закрыта — пока текст (ответ ещё идёт).
+const MATH = /\$\$([\s\S]+?)\$\$/g;
+function mathify(root) {
+  if (!window.katex || !root) return;
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    acceptNode: (n) => n.nodeValue.includes("$$") && !n.parentElement.closest(".katex, textarea, input")
+      ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT,
+  });
+  const nodes = [];
+  while (walker.nextNode()) nodes.push(walker.currentNode);
+  for (const node of nodes) {
+    const text = node.nodeValue;
+    if (!MATH.test(text)) continue;
+    MATH.lastIndex = 0;
+    const frag = document.createDocumentFragment();
+    let last = 0, m;
+    while ((m = MATH.exec(text))) {
+      frag.append(text.slice(last, m.index));
+      const span = document.createElement("span");
+      try {
+        katex.render(m[1], span, { throwOnError: false, displayMode: true });
+      } catch (e) { span.textContent = m[0]; }
+      span.title = m[1];  // LaTeX — во всплывающей подсказке: скопировать
+      frag.append(span);
+      last = m.index + m[0].length;
+    }
+    frag.append(text.slice(last));
+    node.replaceWith(frag);
+  }
+}
+let mathQueued = false;
+new MutationObserver(() => {
+  if (mathQueued) return;
+  mathQueued = true;
+  requestAnimationFrame(() => { mathQueued = false; mathify(document.body); });
+}).observe(document.body, { childList: true, subtree: true, characterData: true });
+window.addEventListener("load", () => mathify(document.body));
+
+// -- база дерева --------------------------------------------------------------- //
+// Какая база выбрана: ?kb=… в адресе, иначе выбор в этом браузере, иначе — с какой
+// запущен сервер (null). «.» — всё дерево. Все запросы к серверу идут с ней (withKb);
+// сменили — страница перезагружается: поиск, статьи, граф и чат — уже по новой базе.
+const KB_KEY = "kbrag.kb";
+function savedKb() {
+  try { return localStorage.getItem(KB_KEY); } catch (e) { return null; }
+}
+const KB = { path: new URLSearchParams(location.search).get("kb") ?? savedKb() };
+function withKb(url) {
+  if (KB.path === null) return url;
+  return url + (url.includes("?") ? "&" : "?") + "kb=" + encodeURIComponent(KB.path || ".");
+}
+async function loadKbs() {
+  const select = $("kb");
+  let data;
+  try {
+    data = await (await fetch(withKb("/api/kbs"))).json();
+  } catch (e) { select.innerHTML = "<option>сервер не ответил</option>"; return; }
+  if (data.error) {  // в адресе или в памяти браузера — база, которой нет
+    try { localStorage.removeItem(KB_KEY); } catch (e) { /* без памяти */ }
+    location.href = location.pathname;
+    return;
+  }
+  select.innerHTML = "";
+  const all = document.createElement("option");
+  all.value = ".";
+  all.textContent = "Все базы — всё дерево";
+  select.append(all);
+  for (const n of data.nodes) {
+    const o = document.createElement("option");
+    o.value = n.path;
+    const count = n.subtree === null ? "" : ` · ${articles(n.subtree)}`;
+    o.textContent = "\u00a0\u00a0".repeat(n.depth) + n.title + count +
+      (n.path === data.server ? " (по умолчанию)" : "");
+    select.append(o);
+  }
+  select.value = data.current || ".";
+  $("kb-title").textContent = data.current ? data.title : "Все базы";
+  document.title = $("kb-title").textContent + " — база знаний";
+  const box = $("examples");
+  box.innerHTML = "";
+  for (const text of data.examples || []) {
+    const chip = document.createElement("span");
+    chip.className = "chip";
+    chip.textContent = text;
+    chip.addEventListener("click", () => ask(chip.textContent));
+    box.append(chip);
+  }
+  box.hidden = !box.children.length || $("chat").children.length > 0;
+}
+$("kb").addEventListener("change", (ev) => {
+  try { localStorage.setItem(KB_KEY, ev.target.value); } catch (e) { /* без памяти */ }
+  location.href = location.pathname;  // ?kb= из адреса — больше не главнее выбора
+});
+
+// Число со словом в нужной форме: 1 статья, 2 статьи, 5 статей, 21 статья, 11 статей.
+function plural(n, one, few, many) {
+  const m10 = n % 10, m100 = n % 100;
+  const word = (m10 === 1 && m100 !== 11) ? one
+    : (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) ? few : many;
+  return `${n} ${word}`;
+}
+const articles = (n) => plural(n, "статья", "статьи", "статей");
+const fragmentsN = (n) => plural(n, "фрагмент", "фрагмента", "фрагментов");
+const inArticles = (n) => `в ${n} ` + ((n % 10 === 1 && n % 100 !== 11) ? "статье" : "статьях");
+const BADGE = { "вектор": "vector", "текст": "text", "оба": "both" };
+
+async function loadStats() {
+  try {
+    const data = await (await fetch(withKb("/api/stats"))).json();
+    const years = data.year_from ? `, ${data.year_from}–${data.year_to}` : "";
+    $("stats").textContent = `${articles(data.documents)}, ${fragmentsN(data.chunks)}${years}`;
+  } catch (e) {
+    $("stats").textContent = "база не отвечает";
+  }
+}
+
+function fragmentNode(chunk, highlight) {
+  const frag = document.createElement("div");
+  frag.className = "frag" + (highlight ? " here" : "");
+  const where = document.createElement("span");
+  where.className = "where";
+  const parts = [];
+  if (chunk.headings && chunk.headings.length) parts.push(chunk.headings.join(" / "));
+  if (chunk.pages && chunk.pages.length) parts.push("с. " + chunk.pages.join(", "));
+  if (chunk.has_table) parts.push("есть таблица");
+  parts.push(chunk.n_tokens + " токенов");
+  if (highlight) parts.push("— найденный кусок");
+  where.textContent = parts.join(" · ");
+  const body = document.createElement("div");
+  body.textContent = chunk.text;
+  frag.append(where, body);
+  return frag;
+}
+
+async function fillParsed(box, docId, highlightOrd) {
+  box.textContent = "загружаю разбор…";
+  try {
+    const data = await (await fetch("/api/document?doc_id=" + encodeURIComponent(docId))).json();
+    box.innerHTML = "";
+    const chunks = data.chunks || [];
+    if (!chunks.length) { box.textContent = "Разбор не найден."; return; }
+    for (const chunk of chunks) box.append(fragmentNode(chunk, chunk.ord === highlightOrd));
+    const found = box.querySelector(".frag.here");
+    if (found) found.scrollIntoView({ block: "center", behavior: "smooth" });
+  } catch (e) {
+    box.textContent = "Не получилось загрузить: " + e;
+  }
+}
+
+function render(hits) {
+  const list = $("results");
+  list.innerHTML = "";
+  for (const hit of hits) {
+    const li = document.createElement("li");
+    li.className = "hit";
+
+    const h2 = document.createElement("h2");
+    if (hit.url) {
+      const a = document.createElement("a");
+      a.href = hit.url; a.target = "_blank"; a.rel = "noopener";
+      a.textContent = hit.title || "(без названия)";
+      h2.append(a);
+    } else {
+      h2.textContent = hit.title || "(без названия)";
+    }
+
+    const meta = document.createElement("div");
+    meta.className = "meta";
+    const badge = document.createElement("span");
+    badge.className = "badge " + (BADGE[hit.found_by] || "vector");
+    badge.textContent = hit.found_by;
+    meta.append(badge);
+    const bits = [];
+    if (hit.year) bits.push(String(hit.year));
+    if (hit.journal) bits.push(hit.journal);
+    if (hit.authors && hit.authors.length) bits.push(hit.authors.join(", "));
+    if (hit.similarity != null) bits.push("похожесть " + Math.round(hit.similarity * 100) + "%");
+    if (hit.pages && hit.pages.length) bits.push("с. " + hit.pages.join(", "));
+    if (hit.headings && hit.headings.length) bits.push(hit.headings.join(" / "));
+    for (const bit of bits) {
+      const span = document.createElement("span");
+      span.textContent = bit;
+      meta.append(span);
+    }
+
+    const p = document.createElement("p");
+    p.className = "snippet";
+    p.textContent = hit.text.slice(0, 500) + (hit.text.length > 500 ? "…" : "");
+
+    const links = document.createElement("div");
+    links.className = "links";
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "open";
+    button.textContent = "Разбор статьи целиком";
+    links.append(button);
+    if (hit.url) {
+      const a = document.createElement("a");
+      a.href = hit.url; a.target = "_blank"; a.rel = "noopener";
+      a.textContent = "открыть у издателя ↗";
+      links.append(a);
+    }
+
+    const parsed = document.createElement("div");
+    parsed.className = "parsed";
+    parsed.hidden = true;
+    let filled = false;
+    button.addEventListener("click", () => {
+      if (!parsed.hidden) { parsed.hidden = true; button.textContent = "Разбор статьи целиком"; return; }
+      parsed.hidden = false;
+      button.textContent = "Свернуть разбор";
+      if (!filled) { fillParsed(parsed, hit.doc_id, hit.ord); filled = true; }
+    });
+
+    li.append(h2, meta, p, links, parsed);
+    list.append(li);
+  }
+}
+
+$("form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const q = $("q").value.trim();
+  if (!q) return;
+
+  $("state").textContent = "ищу…";
+  $("state").className = "state";
+  $("results").innerHTML = "";
+
+  const params = new URLSearchParams({
+    q, limit: $("limit").value, per_doc: $("per_doc").value,
+  });
+  if ($("year_from").value) params.set("year_from", $("year_from").value);
+  const strict = $("strict").value;
+  if (strict === "words") params.set("require_words", "1");
+  else if (strict !== "0") params.set("min_similarity", strict);
+
+  try {
+    const data = await (await fetch(withKb("/api/search?" + params))).json();
+    if (data.error) {
+      $("state").textContent = data.error;
+      $("state").className = "error";
+      return;
+    }
+    if (!data.hits.length) {
+      $("state").textContent = "Ничего подходящего. Ослабьте строгость или попробуйте другие слова — возможно, такого в базе просто нет.";
+      return;
+    }
+    $("state").textContent = `Найдено ${data.hits.length} по запросу «${data.query}»` +
+      (data.also && data.also.length
+        ? ` · по словарю синонимов искал и так: ${data.also.map((x) => `«${x}»`).join(", ")}` : "");
+    render(data.hits);
+  } catch (e) {
+    $("state").textContent = "Сервер не ответил: " + e;
+    $("state").className = "error";
+  }
+});
+
+// -- граф знаний: факты из статей ------------------------------------------------ //
+// Узлы — то, о чём пишут статьи (место, разлом, метод, процесс, признак — вида у узла
+// нет), и сами статьи. Линия между двумя сущностями — факт из статьи: «от — связь —
+// к», у каждого есть дословная цитата. Серые тонкие линии — из какой статьи узел.
+const NET_KINDS = [
+  ["сущность", "--db", "сущности"],
+  ["статья", "--k-doc", "статьи"],
+];
+const net = {
+  data: null, nodes: [], edges: [], byId: {}, adj: {}, pos: {}, hidden: new Set(),
+  view: { x: 0, y: 0, k: 1 }, hover: null, selected: null, match: null,
+  alpha: 0, raf: 0, canvas: null, ctx: null, W: 0, H: 0, colors: {}, fitted: false,
+  cited: new Set(),
+};
+
+function netColors() {
+  const css = getComputedStyle(document.documentElement);
+  for (const [kind, token] of NET_KINDS) net.colors[kind] = css.getPropertyValue(token).trim();
+  net.colors.ink = css.getPropertyValue("--ink").trim();
+  net.colors.muted = css.getPropertyValue("--muted").trim();
+  net.colors.rule = css.getPropertyValue("--rule").trim();
+  net.colors.gpu = css.getPropertyValue("--gpu").trim();
+  net.colors.surface = css.getPropertyValue("--surface").trim();
+}
+
+function netLegend() {
+  const box = $("net-legend");
+  box.innerHTML = "";
+  const counts = {};
+  for (const n of net.data.nodes) counts[n.kind] = (counts[n.kind] || 0) + 1;
+  for (const [kind, , label] of NET_KINDS) {
+    const l = document.createElement("label");
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.checked = !net.hidden.has(kind);
+    cb.addEventListener("change", () => {
+      if (cb.checked) net.hidden.delete(kind); else net.hidden.add(kind);
+      buildNet(true);
+    });
+    const dot = document.createElement("span");
+    dot.className = "dot";
+    dot.style.background = net.colors[kind];
+    l.append(cb, dot, document.createTextNode(`${label} · ${counts[kind] || 0}`));
+    box.append(l);
+  }
+  const facts = net.data.edges.filter((e) => e.type === "факт").length;
+  const f = document.createElement("span");
+  f.innerHTML = `<span class="dot" style="background:${net.colors.gpu}"></span> связи (факты) · ${facts}`;
+  box.append(f);
+}
+
+async function loadNetwork(force) {
+  $("map-tip").textContent = "Колесо — масштаб, тянуть фон — сдвиг, тянуть узел — переставить. " +
+    "Щёлкните узел — внизу все факты о нём с цитатами.";
+  if (net.data && !force) { mountCanvas(); buildNet(false); return; }
+  $("map-state").textContent = "загружаю…";
+  try {
+    const data = await (await fetch(withKb("/api/network"))).json();
+    if (data.error) { $("map-state").textContent = data.error; $("map-box").innerHTML = ""; return; }
+    if (!data.nodes.length) {
+      $("map-state").textContent = "Фактов пока нет: граф строит Qwen3 командой python kbrag.py graph. " +
+        "Чат-бот работает и без него.";
+      $("map-box").innerHTML = "";
+      return;
+    }
+    net.data = data;
+    netColors();
+    netLegend();
+    mountCanvas();
+    buildNet(true);
+  } catch (e) {
+    $("map-state").textContent = "Сервер не ответил: " + e;
+  }
+}
+
+// Положение по умолчанию выводится из имени узла: картинка одна и та же от
+// открытия к открытию, а не новая случайная каша каждый раз.
+function seeded(id) {
+  let h = 2166136261;
+  for (let i = 0; i < id.length; i++) { h ^= id.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return () => { h ^= h << 13; h ^= h >>> 17; h ^= h << 5; return ((h >>> 0) % 10000) / 10000; };
+}
+
+function buildNet(reheat) {
+  const minDocs = Number($("map-min").value);
+  // Сущности — от N статей; статьи — только те, что связаны с показанными сущностями.
+  const entities = net.data.nodes.filter((n) => n.kind === "сущность" && !net.hidden.has(n.kind)
+    && (n.documents || 0) >= minDocs);
+  const ids = new Set(entities.map((n) => n.id));
+  let edges = net.data.edges.filter((e) => e.type === "факт" && ids.has(e.source) && ids.has(e.target));
+  const keep = [...entities];
+  if (!net.hidden.has("статья")) {
+    const docEdges = net.data.edges.filter((e) => e.type === "из статьи" && ids.has(e.target));
+    const docIds = new Set(docEdges.map((e) => e.source));
+    for (const n of net.data.nodes) if (n.kind === "статья" && docIds.has(n.id)) { keep.push(n); ids.add(n.id); }
+    edges = edges.concat(docEdges);
+  }
+  net.nodes = keep.map((n) => {
+    const old = net.pos[n.id];
+    const rnd = seeded(n.id);
+    const r = 120 + rnd() * 220;
+    const a = rnd() * Math.PI * 2;
+    return { ...n, x: old ? old.x : Math.cos(a) * r, y: old ? old.y : Math.sin(a) * r,
+             vx: 0, vy: 0, fixed: false, deg: 0 };
+  });
+  net.byId = Object.fromEntries(net.nodes.map((n) => [n.id, n]));
+  net.adj = {};
+  for (const n of net.nodes) net.adj[n.id] = new Set();
+  net.edges = edges.map((e) => {
+    const s = net.byId[e.source], t = net.byId[e.target];
+    s.deg++; t.deg++;
+    net.adj[s.id].add(t.id); net.adj[t.id].add(s.id);
+    return { ...e, s, t, rest: e.type === "факт" ? 110 : 80 };
+  });
+  if (net.selected && !net.byId[net.selected.id]) net.selected = null;
+  if (net.selected) net.selected = net.byId[net.selected.id];
+  net.hover = null;
+
+  const p = net.data.pass || {};
+  const facts = net.edges.filter((e) => e.type === "факт").length;
+  $("map-state").textContent =
+    `${plural(entities.length, "сущность", "сущности", "сущностей")}, ` +
+    `${plural(facts, "связь", "связи", "связей")}` +
+    (p.passed ? ` · Qwen3 прошла ${p.passed} из ${p.chunks} фрагментов` : "") +
+    (p.as_of ? ` · от ${String(p.as_of).replace("T", " ").slice(0, 16)}` : "");
+  if (reheat) { net.alpha = 1; net.fitted = false; net.userView = false; net.follow = null; }
+  run();
+}
+
+function mountCanvas() {
+  const box = $("map-box");
+  box.innerHTML = "";
+  box.style.position = "relative";
+  const tools = document.createElement("div");
+  tools.className = "net-tools";
+  for (const [label, title, act] of [
+    ["+", "крупнее", () => { net.userView = true; net.follow = null; zoomBy(1.3); }],
+    ["−", "мельче", () => { net.userView = true; net.follow = null; zoomBy(1 / 1.3); }],
+    ["⤢", "показать всё", () => { net.userView = false; net.follow = null; fitView(); draw(); }],
+  ]) {
+    const b = document.createElement("button");
+    b.type = "button"; b.textContent = label; b.title = title;
+    b.addEventListener("click", act);
+    tools.append(b);
+  }
+  const canvas = document.createElement("canvas");
+  box.append(tools, canvas);
+  net.canvas = canvas;
+  net.ctx = canvas.getContext("2d");
+  sizeCanvas();
+  bindCanvas(canvas);
+}
+
+function sizeCanvas() {
+  const box = $("map-box");
+  const dpr = window.devicePixelRatio || 1;
+  net.W = box.clientWidth;
+  net.H = Math.max(420, Math.min(680, Math.round(window.innerHeight * 0.72)));
+  net.canvas.width = net.W * dpr;
+  net.canvas.height = net.H * dpr;
+  net.canvas.style.width = net.W + "px";
+  net.canvas.style.height = net.H + "px";
+  net.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+window.addEventListener("resize", () => {
+  if (net.canvas && !$("panel-graph").hidden) { sizeCanvas(); if (!net.userView) fitView(); draw(); }
+});
+
+const radius = (n) => n.kind === "статья" ? 3.5
+  : 4 + Math.min(11, Math.sqrt(n.documents || 1) * 2.4 + Math.sqrt(n.deg) * 0.8);
+
+const MAX_STEP = 30;          // самое большее за шаг раскладки — страховка от разлёта
+
+function tick() {
+  const N = net.nodes, a = net.alpha;
+  for (let i = 0; i < N.length; i++) {
+    const p = N[i];
+    for (let j = i + 1; j < N.length; j++) {
+      const q = N[j];
+      let dx = q.x - p.x, dy = q.y - p.y;
+      let d2 = dx * dx + dy * dy;
+      if (d2 > 160000) continue;
+      if (d2 < 1) { dx = (Math.random() - 0.5); dy = (Math.random() - 0.5); d2 = 1; }
+      const f = 900 * a / d2;
+      p.vx -= dx * f; p.vy -= dy * f; q.vx += dx * f; q.vy += dy * f;
+    }
+  }
+  // Пружина делится между концами по числу связей (как в d3-force): статья со
+  // 239 связями почти не двигается, её сущности подтягиваются к ней. Раньше
+  // каждая пружина тянула оба конца одинаково, силы на узел-хабе складывались,
+  // он улетал на десятки тысяч единиц, и «показать всё» сжимало граф в точку.
+  for (const e of net.edges) {
+    const dx = e.t.x - e.s.x, dy = e.t.y - e.s.y;
+    const d = Math.sqrt(dx * dx + dy * dy) || 1;
+    const f = (d - e.rest) / d * 0.12 * a / Math.max(1, Math.min(e.s.deg, e.t.deg));
+    const b = e.s.deg / (e.s.deg + e.t.deg);     // какая доля движения — концу-цели
+    e.s.vx += dx * f * (1 - b); e.s.vy += dy * f * (1 - b);
+    e.t.vx -= dx * f * b; e.t.vy -= dy * f * b;
+  }
+  for (const n of N) {
+    n.vx -= n.x * 0.004 * a; n.vy -= n.y * 0.004 * a;
+    if (n.fixed) { n.vx = n.vy = 0; continue; }
+    n.vx *= 0.55; n.vy *= 0.55;
+    const v = Math.hypot(n.vx, n.vy);
+    if (v > MAX_STEP) { n.vx *= MAX_STEP / v; n.vy *= MAX_STEP / v; }
+    n.x += n.vx; n.y += n.vy;
+    net.pos[n.id] = { x: n.x, y: n.y };
+  }
+  net.alpha *= 0.975;
+}
+
+function run() {
+  if (net.raf) return;
+  const frame = () => {
+    net.raf = 0;
+    const steps = net.fitted ? 1 : 3;
+    for (let i = 0; i < steps && net.alpha > 0.02; i++) tick();
+    // Первое «показать всё» — только если человек ещё не нашёл узел сам: раньше оно
+    // срабатывало позже поиска и сбрасывало найденное в мелкий общий вид.
+    if (!net.fitted && net.alpha < 0.3) { if (!net.userView) fitView(); net.fitted = true; }
+    const moving = net.alpha > 0.02 || net.dragging;
+    if (net.follow && moving && !net.dragging) viewAround(net.follow);
+    // Раскладка улеглась — показать всё ещё раз, если человек сам не двигал вид.
+    if (!moving && !net.userView) { fitView(); net.fitted = true; }
+    draw();
+    if (moving) net.raf = requestAnimationFrame(frame);
+  };
+  net.raf = requestAnimationFrame(frame);
+}
+
+// Границы — без крайних 2 % узлов с каждой стороны: один отлетевший узел не
+// должен сжимать весь граф в точку.
+function quantile(sorted, q) { return sorted[Math.min(sorted.length - 1, Math.floor(q * sorted.length))]; }
+
+function fitView() {
+  if (!net.nodes.length) return;
+  const xs = net.nodes.map((n) => n.x).sort((a, b) => a - b);
+  const ys = net.nodes.map((n) => n.y).sort((a, b) => a - b);
+  // Больших графов без крайних 8 %: мелкие обрывки, которых сотни, разлетаются по краям
+  // и сжимали общий вид; основное облако теперь крупнее, края — прокруткой.
+  const cut = net.nodes.length > 200 ? 0.08 : net.nodes.length > 50 ? 0.02 : 0;
+  const x0 = quantile(xs, cut), x1 = quantile(xs, 1 - cut);
+  const y0 = quantile(ys, cut), y1 = quantile(ys, 1 - cut);
+  const k = Math.max(0.05, Math.min(2, net.W / (x1 - x0 + 160), net.H / (y1 - y0 + 120)));
+  net.view = { k, x: -((x0 + x1) / 2) * k, y: -((y0 + y1) / 2) * k };
+}
+
+function zoomBy(f, sx, sy) {
+  const v = net.view;
+  const k = Math.max(0.15, Math.min(6, v.k * f));
+  sx = sx ?? net.W / 2; sy = sy ?? net.H / 2;
+  const wx = (sx - net.W / 2 - v.x) / v.k, wy = (sy - net.H / 2 - v.y) / v.k;
+  net.view = { k, x: sx - net.W / 2 - wx * k, y: sy - net.H / 2 - wy * k };
+  draw();
+}
+
+function toWorld(sx, sy) {
+  const v = net.view;
+  return [(sx - net.W / 2 - v.x) / v.k, (sy - net.H / 2 - v.y) / v.k];
+}
+
+function hit(sx, sy) {
+  const [wx, wy] = toWorld(sx, sy);
+  let best = null, bestD = Infinity;
+  for (const n of net.nodes) {
+    const d = Math.hypot(n.x - wx, n.y - wy);
+    if (d < radius(n) + 5 / net.view.k && d < bestD) { best = n; bestD = d; }
+  }
+  return best;
+}
+
+function short(text, max) { return text.length > max ? text.slice(0, max - 1) + "…" : text; }
+
+function draw() {
+  const { ctx, W, H, view: v } = net;
+  if (!ctx) return;
+  ctx.clearRect(0, 0, W, H);
+  ctx.save();
+  ctx.translate(W / 2 + v.x, H / 2 + v.y);
+  ctx.scale(v.k, v.k);
+  const focus = net.hover || (net.selected && net.byId[net.selected.id] ? net.selected : null);
+  const near = focus ? (net.adj[focus.id] || new Set()) : null;
+
+  for (const e of net.edges) {
+    const on = focus && (e.s === focus || e.t === focus);
+    const fact = e.type === "факт";
+    ctx.globalAlpha = focus ? (on ? 0.9 : 0.05) : (fact ? 0.55 : 0.18);
+    ctx.strokeStyle = fact ? net.colors.gpu : net.colors.ink;
+    ctx.lineWidth = (fact ? 1 + Math.min(3, Math.log2(1 + e.weight)) : 0.7) / Math.sqrt(v.k);
+    ctx.beginPath();
+    ctx.moveTo(e.s.x, e.s.y);
+    ctx.lineTo(e.t.x, e.t.y);
+    ctx.stroke();
+    if (fact) arrowHead(e.s, e.t, v.k);
+  }
+
+  // Подписи связей — у выбранного или наведённого узла: что именно утверждает статья.
+  if (focus) {
+    ctx.font = `400 ${11 / v.k}px "IBM Plex Sans", "Segoe UI", sans-serif`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    for (const e of net.edges) {
+      if (e.type !== "факт" || (e.s !== focus && e.t !== focus)) continue;
+      const x = (e.s.x + e.t.x) / 2, y = (e.s.y + e.t.y) / 2;
+      ctx.globalAlpha = 1;
+      ctx.lineWidth = 3 / v.k;
+      ctx.strokeStyle = net.colors.surface;
+      ctx.strokeText(short(e.label, 28), x, y);
+      ctx.fillStyle = net.colors.gpu;
+      ctx.fillText(short(e.label, 28), x, y);
+    }
+  }
+
+  for (const n of net.nodes) {
+    const dim = focus && n !== focus && !near.has(n.id);
+    ctx.globalAlpha = dim ? 0.12 : 1;
+    ctx.fillStyle = net.colors[n.kind] || net.colors.ink;
+    ctx.beginPath();
+    ctx.arc(n.x, n.y, radius(n), 0, Math.PI * 2);
+    ctx.fill();
+    if (net.cited.has(n.id)) {
+      ctx.globalAlpha = 1;
+      ctx.lineWidth = 3 / v.k;
+      ctx.strokeStyle = net.colors.gpu;
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, radius(n) + 3 / v.k, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    if (n === net.selected || (net.match && net.match.has(n.id))) {
+      ctx.lineWidth = 2.5 / v.k;
+      ctx.strokeStyle = net.colors.ink;
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, radius(n), 0, Math.PI * 2);
+      ctx.stroke();
+    }
+  }
+
+  ctx.textAlign = "center";
+  ctx.textBaseline = "top";
+  const fontPx = 12 / v.k;
+  for (const n of net.nodes) {
+    const big = n.kind === "сущность" && (n.documents >= 2 || n.deg >= 3);
+    const show = n === focus || (near && near.has(n.id)) || (net.match && net.match.has(n.id))
+      || net.cited.has(n.id) || (!focus && ((big && v.k > 0.6) || v.k > 1.7));
+    if (!show) continue;
+    const dim = focus && n !== focus && !near.has(n.id);
+    ctx.globalAlpha = dim ? 0.15 : 1;
+    ctx.font = `${n.kind === "сущность" ? 600 : 400} ${fontPx}px "IBM Plex Sans", "Segoe UI", sans-serif`;
+    const label = short(n.name, n.kind === "статья" ? 42 : 40);
+    const y = n.y + radius(n) + 3 / v.k;
+    ctx.lineWidth = 3 / v.k;
+    ctx.strokeStyle = net.colors.surface;
+    ctx.strokeText(label, n.x, y);
+    ctx.fillStyle = net.colors.ink;
+    ctx.fillText(label, n.x, y);
+  }
+  ctx.restore();
+  ctx.globalAlpha = 1;
+}
+
+// Наконечник стрелки у края узла-цели: факт читается «от → к».
+function arrowHead(s, t, k) {
+  const dx = t.x - s.x, dy = t.y - s.y, len = Math.hypot(dx, dy);
+  if (len < 1) return;
+  const ux = dx / len, uy = dy / len, r = radius(t) + 2 / k, size = 7 / Math.sqrt(k);
+  const x = t.x - ux * r, y = t.y - uy * r;
+  const ctx = net.ctx;
+  ctx.fillStyle = ctx.strokeStyle;
+  ctx.beginPath();
+  ctx.moveTo(x, y);
+  ctx.lineTo(x - ux * size - uy * size * 0.5, y - uy * size + ux * size * 0.5);
+  ctx.lineTo(x - ux * size + uy * size * 0.5, y - uy * size - ux * size * 0.5);
+  ctx.closePath();
+  ctx.fill();
+}
+
+function bindCanvas(canvas) {
+  let press = null;
+  const local = (ev) => {
+    const r = canvas.getBoundingClientRect();
+    return [ev.clientX - r.left, ev.clientY - r.top];
+  };
+  canvas.addEventListener("pointerdown", (ev) => {
+    const [sx, sy] = local(ev);
+    const n = hit(sx, sy);
+    press = { sx, sy, node: n, vx: net.view.x, vy: net.view.y, moved: false };
+    net.userView = true;
+    net.follow = null;            // человек двигает сам — вид больше не едет за узлом
+    canvas.setPointerCapture(ev.pointerId);
+    if (n) { n.fixed = true; net.dragging = true; }
+  });
+  canvas.addEventListener("pointermove", (ev) => {
+    const [sx, sy] = local(ev);
+    if (press) {
+      if (Math.hypot(sx - press.sx, sy - press.sy) > 4) press.moved = true;
+      if (press.node && press.moved) {
+        const [wx, wy] = toWorld(sx, sy);
+        press.node.x = wx; press.node.y = wy;
+        net.pos[press.node.id] = { x: wx, y: wy };
+        net.alpha = Math.max(net.alpha, 0.25);
+        run();
+      } else if (!press.node) {
+        net.view.x = press.vx + (sx - press.sx);
+        net.view.y = press.vy + (sy - press.sy);
+        draw();
+      }
+      return;
+    }
+    const n = hit(sx, sy);
+    canvas.classList.toggle("on-node", !!n);
+    if (n !== net.hover) {
+      net.hover = n;
+      if (n) $("map-tip").textContent = nodeTip(n);
+      draw();
+    }
+  });
+  const release = () => {
+    if (!press) return;
+    if (press.node) { press.node.fixed = false; net.dragging = false; }
+    if (!press.moved) selectNode(press.node);
+    press = null;
+  };
+  canvas.addEventListener("pointerup", release);
+  canvas.addEventListener("pointercancel", release);
+  canvas.addEventListener("pointerleave", () => { if (!press && net.hover) { net.hover = null; draw(); } });
+  canvas.addEventListener("wheel", (ev) => {
+    ev.preventDefault();
+    net.userView = true;
+    net.follow = null;
+    const [sx, sy] = local(ev);
+    zoomBy(Math.exp(-ev.deltaY * 0.0015), sx, sy);
+  }, { passive: false });
+}
+
+function nodeTip(n) {
+  if (n.kind === "статья") return `${n.name}${n.year ? ", " + n.year : ""}`;
+  return `${n.name} — ${plural(n.facts, "факт", "факта", "фактов")} ${inArticles(n.documents)}`;
+}
+
+function selectNode(n) {
+  net.selected = n;
+  draw();
+  const box = $("map-detail");
+  box.innerHTML = "";
+  if (!n) return;
+  const h = document.createElement("h3");
+  h.textContent = n.name;
+  const meta = document.createElement("div");
+  meta.className = "meta";
+  const kind = document.createElement("span");
+  kind.className = "badge";
+  kind.style.color = net.colors[n.kind];
+  kind.textContent = n.kind;
+  meta.append(kind);
+  if (n.in_dictionary) {
+    const d = document.createElement("span");
+    d.className = "badge";
+    d.textContent = "в словаре синонимов";
+    meta.append(d);
+  }
+  if (n.year) meta.append(document.createTextNode(String(n.year)));
+  box.append(h, meta);
+  if (n.spellings && n.spellings.length) {
+    const p = document.createElement("p");
+    p.className = "legend";
+    p.textContent = "В статьях пишут и так: " + n.spellings.join(", ");
+    box.append(p);
+  }
+  if (n.kind === "статья") return articleCard(box, n);
+  entityCard(box, n);
+}
+
+function articleCard(box, n) {
+  const actions = document.createElement("div");
+  actions.className = "links";
+  if (n.doi_url || n.url) {
+    const a = document.createElement("a");
+    a.href = n.doi_url || n.url; a.target = "_blank"; a.rel = "noopener";
+    a.textContent = "открыть у издателя ↗";
+    actions.append(a);
+  }
+  const b = document.createElement("button");
+  b.type = "button"; b.className = "open"; b.textContent = "Разбор статьи целиком";
+  const parsed = document.createElement("div");
+  parsed.className = "parsed"; parsed.hidden = true;
+  b.addEventListener("click", () => {
+    parsed.hidden = !parsed.hidden;
+    if (!parsed.hidden && !parsed.childElementCount) fillParsed(parsed, n.doc_id, null);
+  });
+  actions.prepend(b);
+  box.append(actions, parsed);
+  const list = [...(net.adj[n.id] || [])].map((id) => net.byId[id]).filter((m) => m.kind === "сущность");
+  if (!list.length) return;
+  const sub = document.createElement("div");
+  sub.className = "sub";
+  sub.textContent = `о чём факты из этой статьи · ${list.length}`;
+  const chips = document.createElement("div");
+  chips.className = "chips";
+  for (const m of list.sort((a, b) => b.documents - a.documents)) {
+    const chip = document.createElement("span");
+    chip.className = "chip";
+    chip.textContent = short(m.name, 60);
+    chip.addEventListener("click", () => { centerOn(m); selectNode(m); });
+    chips.append(chip);
+  }
+  box.append(sub, chips);
+}
+
+// Карточка сущности — её датасет: все факты о ней (и о том, что в неё входит)
+// с цитатами. Строка факта по нажатию раскрывает цитаты и статьи.
+async function entityCard(box, n) {
+  const q = new URLSearchParams({ name: n.name });
+  const head = document.createElement("div");
+  head.className = "links";
+  const csv = document.createElement("a");
+  csv.href = withKb("/api/dataset?" + q + "&format=csv");
+  csv.textContent = "таблица фактов для Excel (CSV) ↓";
+  const askBtn = document.createElement("button");
+  askBtn.type = "button"; askBtn.className = "open";
+  askBtn.textContent = "Спросить чат-бота: что известно";
+  askBtn.addEventListener("click", () => {
+    showTab("chat");
+    ask(`Что известно о «${n.name}» по статьям базы?`);
+  });
+  head.append(askBtn, csv);
+  const state = document.createElement("div");
+  state.className = "meta";
+  state.textContent = "загружаю факты…";
+  box.append(head, state);
+  let data;
+  try {
+    data = await (await fetch(withKb("/api/dataset?" + q))).json();
+  } catch (e) { state.textContent = "Сервер не ответил: " + e; return; }
+  if (net.selected !== n) return;                       // пока грузили, выбрали другое
+  if (data.error) { state.textContent = data.error; return; }
+  state.textContent = `${plural(data.facts.length, "факт", "факта", "фактов")} · ${articles(data.documents)}` +
+    (data.includes.length ? " · вместе с тем, что входит: " + data.includes.join(", ") : "");
+  const table = document.createElement("table");
+  table.className = "dataset";
+  for (const r of data.facts) {
+    const tr = document.createElement("tr");
+    tr.className = "fact";
+    const text = document.createElement("td");
+    const other = net.byId["сущность:" + r.other];
+    const otherEl = document.createElement(other ? "button" : "span");
+    otherEl.textContent = r.other;
+    if (other) {
+      otherEl.type = "button"; otherEl.className = "link";
+      otherEl.addEventListener("click", (ev) => { ev.stopPropagation(); centerOn(other); selectNode(other); });
+    }
+    const rel = document.createElement("span");
+    rel.className = "rel";
+    rel.textContent = ` — ${r.relation} — `;
+    const self = document.createElement("span");
+    self.className = r.about === n.name ? "self" : "part";
+    self.textContent = r.about;
+    if (r.direction === "→") text.append(self, rel, otherEl);
+    else text.append(otherEl, rel, self);
+    const count = document.createElement("td");
+    count.className = "num";
+    count.textContent = articles(r.documents);
+    tr.append(text, count);
+    const why = document.createElement("tr");
+    why.hidden = true;
+    const cell = document.createElement("td");
+    cell.colSpan = 2;
+    cell.className = "explain";
+    for (const qt of r.quotes) {
+      const bq = document.createElement("blockquote");
+      bq.textContent = `«${qt.quote}»`;
+      const src = document.createElement("div");
+      src.className = "links";
+      const art = document.createElement("button");
+      art.type = "button"; art.className = "open";
+      art.textContent = short(qt.title || qt.doc_id, 70) + (qt.year ? ", " + qt.year : "");
+      art.addEventListener("click", () => focusArticle(qt.doc_id));
+      src.append(art);
+      if (qt.url) {
+        const a = document.createElement("a");
+        a.href = qt.url; a.target = "_blank"; a.rel = "noopener"; a.textContent = "у издателя ↗";
+        src.append(a);
+      }
+      cell.append(bq, src);
+    }
+    why.append(cell);
+    tr.addEventListener("click", () => { why.hidden = !why.hidden; });
+    table.append(tr, why);
+  }
+  const sub = document.createElement("div");
+  sub.className = "sub";
+  sub.textContent = "факты — нажмите строку, чтобы увидеть цитату и статью";
+  box.append(sub, table);
+}
+
+// Показать узел вместе с соседями: масштаб — чтобы все его связи вошли в кадр,
+// но не мельче, чем нужно для подписей (у узла с сотней связей — только ближние).
+function centerOn(n) {
+  net.userView = true;
+  net.follow = n;               // раскладка ещё движется — вид едет за узлом (см. run)
+  viewAround(n);
+}
+
+function viewAround(n) {
+  const near = [n, ...[...(net.adj[n.id] || [])].map((id) => net.byId[id]).filter(Boolean)];
+  const xs = near.map((m) => m.x), ys = near.map((m) => m.y);
+  const w = Math.max(...xs) - Math.min(...xs), h = Math.max(...ys) - Math.min(...ys);
+  const k = Math.max(0.35, Math.min(1.4, net.W / (w + 320), net.H / (h + 200)));
+  const cx = near.length > 1 ? (Math.max(...xs) + Math.min(...xs)) / 2 : n.x;
+  const cy = near.length > 1 ? (Math.max(...ys) + Math.min(...ys)) / 2 : n.y;
+  net.view = { k, x: -cx * k, y: -cy * k };
+  draw();
+}
+
+// Поиск — по всем узлам графа, а не только по показанным фильтром «Узлы»:
+// найденное, но скрытое фильтром, показывается снятием фильтра.
+const norm = (t) => (t || "").toLowerCase().replaceAll("ё", "е");
+const WORD = /[a-zа-я0-9]+/g;
+// Основа слова для поиска — без окончания: «персияновский разлом» находит
+// «зоне Персияновского разлома», «разломы» — «разлома».
+const stem = (w) => w.length > 5 ? w.slice(0, -2) : w.length > 3 ? w.slice(0, -1) : w;
+
+function findNodes(q) {
+  const words = norm(q).match(WORD) || [];
+  if (norm(q.trim()).length < 2 || !words.length || !net.data) return [];
+  const stems = words.map(stem);
+  const hits = (text) => {
+    const have = norm(text).match(WORD) || [];
+    return stems.every((st) => have.some((w) => w.startsWith(st)));
+  };
+  const whole = norm(q.trim());
+  const rank = (n) => {
+    const name = norm(n.name);
+    return name === whole ? 0 : name.startsWith(whole) ? 1 : name.includes(whole) ? 2 : 3;
+  };
+  return net.data.nodes
+    .filter((n) => hits(n.name + " " + (n.spellings || []).join(" ")))
+    .sort((a, b) => rank(a) - rank(b) || (b.documents || 0) - (a.documents || 0)
+                    || (b.facts || 0) - (a.facts || 0) || a.name.length - b.name.length);
+}
+
+// Как назвать сводный датасет: слова запроса, с большой буквы — те, что в
+// найденном узле написаны с большой (имя собственное): «Персияновский разлом».
+function combinedName(q, node) {
+  const original = node.name.match(/[A-Za-zА-Яа-яЁё0-9]+/g) || [];
+  return (q.trim().match(/[A-Za-zА-Яа-яЁё0-9-]+/g) || []).map((w) => {
+    const st = stem(norm(w));
+    const same = original.find((o) => norm(o).startsWith(st));
+    return same && /^[A-ZА-ЯЁ]/.test(same) ? w[0].toUpperCase() + w.slice(1) : w;
+  }).join(" ");
+}
+
+function showFound(list, q) {
+  const box = $("net-found");
+  box.innerHTML = "";
+  net.match = list.length ? new Set(list.map((n) => n.id)) : null;
+  if (net.ctx) draw();
+  if (!q || norm(q.trim()).length < 2) return;
+  if (!net.data) {
+    // Граф не загрузился (ошибка сервера) — это не «на графе нет».
+    const none = document.createElement("div");
+    none.className = "meta";
+    none.textContent = "Граф не загрузился, искать не в чем — причина написана ниже. " +
+      "Если сервер запущен давно, перезапустите его.";
+    box.append(none);
+    return;
+  }
+  // Имя собственное стоит внутри нескольких узлов («зоне Персияновского разлома»,
+  // «южнее Персияновского разлома…») — сервер соберёт их факты в один датасет.
+  const entities = list.filter((n) => n.kind === "сущность");
+  const wanted = norm(q.trim());
+  if (entities.length >= 2 && !entities.some((n) => norm(n.name) === wanted)) {
+    const name = combinedName(q, entities[0]);
+    if (/[A-ZА-ЯЁ]/.test(name)) {
+      const all = document.createElement("button");
+      all.type = "button";
+      all.textContent = `Все факты о «${name}»`;
+      const kind = document.createElement("span");
+      kind.className = "kind";
+      kind.textContent = `сводно по ${plural(entities.length, "узлу", "узлам", "узлам")}`;
+      all.append(kind);
+      all.addEventListener("click", () => {
+        selectNode({ id: "свод:" + name, name, kind: "сущность", facts: 0, documents: 0 });
+        $("map-detail").scrollIntoView({ block: "start", behavior: "smooth" });
+      });
+      box.append(all);
+    }
+  }
+  if (!list.length) {
+    const none = document.createElement("div");
+    none.className = "meta";
+    none.textContent = `«${q.trim()}» на графе нет. Попробуйте часть слова: «разлом», «золот».`;
+    box.append(none);
+    return;
+  }
+  for (const n of list.slice(0, 15)) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.textContent = n.name;
+    const kind = document.createElement("span");
+    kind.className = "kind";
+    kind.textContent = n.kind === "статья" ? "статья" + (n.year ? ", " + n.year : "")
+      : `${plural(n.facts || 0, "факт", "факта", "фактов")} ${inArticles(n.documents || 0)}`;
+    b.append(kind);
+    b.addEventListener("click", () => focusNode(n.id));
+    box.append(b);
+  }
+  if (list.length > 15) {
+    const more = document.createElement("div");
+    more.className = "meta";
+    more.textContent = `и ещё ${list.length - 15} — уточните запрос`;
+    box.append(more);
+  }
+}
+
+// Граф ещё грузится — поиск его дожидается, а не пишет «не загрузился».
+async function searchNet() {
+  if (!net.data && net.loading) await net.loading;
+  const q = $("net-search").value;
+  const list = findNodes(q);
+  showFound(list, q);
+  return list;
+}
+$("net-search").addEventListener("input", searchNet);
+$("net-search").addEventListener("keydown", async (ev) => {
+  if (ev.key !== "Enter") return;
+  const list = await searchNet();
+  if (list.length) focusNode(list[0].id);
+});
+$("net-find").addEventListener("click", async () => {
+  const list = await searchNet();
+  if (list.length) focusNode(list[0].id);
+});
+
+let docsLoaded = false;
+async function loadDocs() {
+  if (docsLoaded) return;
+  try {
+    const data = await (await fetch(withKb("/api/documents"))).json();
+    if (data.error) { $("docs-state").textContent = data.error; return; }
+    if (!data.documents.length) {
+      $("docs-state").textContent = "В базе пока нет статей. Добавить свои: python kbrag.py import «папка с PDF».";
+      return;
+    }
+    $("docs-state").textContent = `${plural(data.documents.length, "статья", "статьи", "статей")} разобрано`;
+    const box = $("docs");
+    box.innerHTML = "";
+    for (const doc of data.documents) box.append(renderDoc(doc));
+    docsLoaded = true;
+  } catch (e) {
+    $("docs-state").textContent = "Сервер не ответил: " + e;
+  }
+}
+
+function renderDoc(doc) {
+  const wrap = document.createElement("div");
+  wrap.className = "doc";
+
+  const name = document.createElement("div");
+  name.className = "name";
+  if (doc.url) {
+    const a = document.createElement("a");
+    a.href = doc.url; a.target = "_blank"; a.rel = "noopener";
+    a.textContent = doc.title || doc.doc_id;
+    a.style.color = "inherit";
+    name.append(a);
+  } else {
+    name.textContent = doc.title || doc.doc_id;
+  }
+
+  const meta = document.createElement("div");
+  meta.className = "meta";
+  const bits = [];
+  if (doc.year) bits.push(String(doc.year));
+  if (doc.journal) bits.push(doc.journal);
+  if (doc.authors && doc.authors.length) bits.push(doc.authors.slice(0, 3).join(", "));
+  bits.push(fragmentsN(doc.chunks));
+  if (doc.pages) bits.push(plural(doc.pages, "страница", "страницы", "страниц"));
+  if (doc.parser) bits.push("разобрал " + doc.parser);
+  if (doc.source) bits.push("найдено в " + doc.source);
+  for (const bit of bits) {
+    const span = document.createElement("span");
+    span.textContent = bit;
+    meta.append(span);
+  }
+
+  const button = document.createElement("button");
+  button.className = "open";
+  button.type = "button";
+  button.textContent = "Показать разбор";
+
+  const parsed = document.createElement("div");
+  parsed.className = "parsed";
+  parsed.hidden = true;
+
+  let filled = false;
+  button.addEventListener("click", async () => {
+    if (!parsed.hidden) { parsed.hidden = true; button.textContent = "Показать разбор"; return; }
+    parsed.hidden = false;
+    button.textContent = "Свернуть";
+    if (filled) return;
+    await fillParsed(parsed, doc.doc_id, null);
+    filled = true;
+  });
+
+  wrap.append(name, meta, button, parsed);
+  return wrap;
+}
+
+// -- вкладки ------------------------------------------------------------------ //
+function showTab(which) {
+  for (const name of ["search", "docs", "chat", "graph"]) {
+    $("panel-" + name).hidden = name !== which;
+    $("tab-" + name).setAttribute("aria-selected", String(name === which));
+  }
+  if (which === "docs") loadDocs();
+  if (which === "chat") {
+    loadBotStatus();
+    $("ask").focus();
+  }
+  if (which === "graph") {
+    net.loading = loadNetwork(false);
+    $("net-search").focus();
+  }
+}
+$("tab-search").addEventListener("click", () => showTab("search"));
+$("tab-docs").addEventListener("click", () => showTab("docs"));
+$("tab-chat").addEventListener("click", () => showTab("chat"));
+$("tab-graph").addEventListener("click", () => showTab("graph"));
+
+$("map-min").addEventListener("change", () => { if (net.data) buildNet(true); });
+
+// -- чат-бот ------------------------------------------------------------------ //
+const chat = { history: [], busy: false, abort: null };
+const HISTORY_KEEP = 8;
+
+// Галочка «сверять статьи»: выбор человека помнит браузер, пока не выбрал — как на сервере.
+const CONFLICTS_KEY = "kbrag.conflicts";
+function savedConflicts() {
+  try { return localStorage.getItem(CONFLICTS_KEY); } catch (e) { return null; }
+}
+$("opt-conflicts").addEventListener("change", (ev) => {
+  try { localStorage.setItem(CONFLICTS_KEY, ev.target.checked ? "1" : "0"); } catch (e) { /* без памяти */ }
+});
+if (savedConflicts() !== null) $("opt-conflicts").checked = savedConflicts() === "1";
+// Быстрый режим — тоже выбор этого браузера.
+const FAST_KEY = "kbrag.fast";
+try { $("opt-fast").checked = localStorage.getItem(FAST_KEY) === "1"; } catch (e) { /* без памяти */ }
+$("opt-fast").addEventListener("change", (ev) => {
+  try { localStorage.setItem(FAST_KEY, ev.target.checked ? "1" : "0"); } catch (e) { /* без памяти */ }
+});
+
+async function loadBotStatus() {
+  const box = $("bot-status"), text = $("bot-status-text");
+  try {
+    const s = await (await fetch("/api/chat/status")).json();
+    box.className = "bot-status " + (s.ok ? "ok" : "bad");
+    text.textContent = s.ok ? `${s.model} · готов` : s.error;
+    if (savedConflicts() === null && typeof s.conflicts === "boolean") $("opt-conflicts").checked = s.conflicts;
+  } catch (e) {
+    box.className = "bot-status bad";
+    text.textContent = "сервер не ответил";
+  }
+}
+
+function escapeHtml(s) {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+// Ответ модели → HTML: абзацы, списки, **жирный**, номера фрагментов [n] — кнопками.
+// Текст сначала экранируется целиком: из ответа модели в страницу не попадёт разметка.
+function renderAnswer(text, count) {
+  const lines = escapeHtml(text).split("\n");
+  let html = "", list = null, para = [];
+  const flushPara = () => { if (para.length) { html += "<p>" + para.join("<br>") + "</p>"; para = []; } };
+  const closeList = () => { if (list) { html += `</${list}>`; list = null; } };
+  for (const raw of lines) {
+    let line = raw.trim();
+    const ul = line.match(/^[-*•]\s+(.*)/), ol = line.match(/^\d+[.)]\s+(.*)/);
+    if (ul || ol) {
+      flushPara();
+      const tag = ul ? "ul" : "ol";
+      if (list !== tag) { closeList(); html += `<${tag}>`; list = tag; }
+      html += "<li>" + (ul || ol)[1] + "</li>";
+      continue;
+    }
+    if (!line) { flushPara(); closeList(); continue; }
+    closeList();
+    const heading = line.match(/^#{1,4}\s+(.*)/);
+    if (heading) line = "**" + heading[1] + "**";
+    para.push(line);
+  }
+  flushPara(); closeList();
+  html = html.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+  return html.replace(/\[(\d+(?:\s*[,;]\s*\d+)*)\]/g, (m, group) => group.split(/[,;]/).map((x) => {
+    const n = Number(x.trim());
+    const ok = n >= 1 && n <= count;
+    return `<span class="cite${ok ? "" : " bad"}" data-n="${n}" ` +
+      `title="${ok ? "фрагмент " + n : "такого фрагмента модели не давали"}">${n}</span>`;
+  }).join(""));
+}
+
+function sourceWhere(s) {
+  const bits = [];
+  if (s.year) bits.push(String(s.year));
+  if (s.pages && s.pages.length) bits.push("с. " + s.pages.slice(0, 3).join(", "));
+  return bits.join(", ");
+}
+
+// В базе нет — плашка над ответом: сказано прямо, и видно, что искалось.
+function renderNotInBase(ev) {
+  const box = document.createElement("div");
+  box.className = "not-in-base";
+  const head = document.createElement("strong");
+  const line = document.createElement("div");
+  if (ev.off_topic) {
+    // Вопрос не по теме базы: ответа из общих знаний нет, только отказ.
+    head.textContent = "Вопрос не по теме базы знаний.";
+    line.textContent = "Бот отвечает только по теме выбранной базы знаний — её статьям.";
+  } else {
+    head.textContent = "По вашему запросу в базе знаний такой информации нет.";
+    line.textContent = "Ниже — ответ модели из её общих знаний. Он не подтверждён статьями базы — проверяйте его.";
+  }
+  box.append(head, line);
+  if (ev.queries && ev.queries.length) {
+    const q = document.createElement("div");
+    q.className = "queries";
+    q.textContent = "Искал в базе: " + ev.queries.map((x) => `«${x}»`).join(" · ");
+    box.append(q);
+  }
+  return box;
+}
+
+// Рисунки фрагментов, на которые сослался ответ: картинка, «Рис. 3 к [2]», подпись.
+// Нажать — картинка целиком в новой вкладке.
+function renderFigures(figures) {
+  const box = document.createElement("div");
+  box.className = "figures";
+  for (const f of figures) {
+    const fig = document.createElement("figure");
+    const link = document.createElement("a");
+    link.href = f.url;
+    link.target = "_blank";
+    const img = document.createElement("img");
+    img.src = f.url;
+    img.loading = "lazy";
+    img.alt = f.caption || "рисунок";
+    link.append(img);
+    const cap = document.createElement("figcaption");
+    const name = f.label ? `Рис. ${f.label}` : `Рисунок ${f.n}`;
+    const page = f.page ? `, с. ${f.page}` : "";
+    cap.textContent = `${name} к [${f.source}]${page}. ${f.caption}`;
+    cap.title = f.title;
+    fig.append(link, cap);
+    box.append(fig);
+  }
+  return box;
+}
+
+function renderSources(sources, used, queries, info) {
+  info = info || {};
+  const box = document.createElement("div");
+  box.className = "sources";
+  const head = document.createElement("div");
+  head.className = "sub";
+  head.textContent = used.length
+    ? `Источники · в ответе ${used.length} из ${sources.length}`
+    : `Найденные фрагменты · ${sources.length}`;
+  box.append(head);
+  const line = (text) => {
+    const q = document.createElement("div");
+    q.className = "queries";
+    q.textContent = text;
+    box.append(q);
+  };
+  if (info.dataset) {
+    line(`Собрано из фактов графа о «${info.dataset}»: всё, что о нём выписано из статей базы, ` +
+      "а не только то, что нашёл поиск.");
+  }
+  if (info.graph) {
+    line(`Из графа связей — ${plural(info.graph, "фрагмент", "фрагмента", "фрагментов")} о предмете ` +
+      "вопроса: там, откуда выписаны факты о нём. Брать ли их, решала модель.");
+  }
+  if (info.parts && info.parts.length) {
+    line("Вопрос разобран на части: " + info.parts.map((p, i) =>
+      `${i + 1}) ${p.question} — фрагментов ${p.found}`).join(" · "));
+  }
+  if (queries && queries.length) {
+    const first = queries.filter((x) => !(info.extra || []).includes(x));
+    line("Искал в базе: " + first.map((x) => `«${x}»`).join(" · "));
+  }
+  if (info.fast) line("Быстрый режим: вопрос не разбирался моделью, статьи не сверялись.");
+  if (info.reranked && info.checked) {
+    line(`Реранкер оценил найденное (фрагментов: ${info.checked}) и взял подходящие` +
+      (info.judged ? "; чего не хватало — сказала модель" : "") +
+      (info.rounds > 1 ? `; кругов поиска: ${info.rounds}` : "") + ".");
+  } else if (info.judged && info.checked) {
+    line(`Модель прочла найденное (фрагментов: ${info.checked}) и взяла для ответа подходящие` +
+      (info.rounds > 1 ? `; кругов поиска: ${info.rounds}` : "") + ".");
+  } else if (info.judged === false) {
+    line("Модель при отборе не ответила — фрагменты взяты по близости, как в обычном поиске.");
+  }
+  if (info.conflicts && info.conflicts.length) {
+    line("Статьи отвечают по-разному: " + info.conflicts.map((c) =>
+      `[${c.a}] «${c.said_a}» — [${c.b}] «${c.said_b}»`).join(" · ") +
+      ". Модели велено сверить по фрагментам и, если это так, привести обе позиции.");
+  }
+  if (info.extra && info.extra.length) {
+    line("Искал ещё" + (info.missing && info.missing.length
+      ? ` — не хватало: ${info.missing.join("; ")}` : "") +
+      ". Запросы: " + info.extra.map((x) => `«${x}»`).join(" · "));
+  }
+  if (info.timings) {
+    // Те же этапы и имена, что в журнале (chat/answer.py, STAGES).
+    const names = { plan: "разбор", search: "поиск", judge: "отбор", conflicts: "сверка", answer: "ответ" };
+    const bits = Object.keys(names).filter((k) => k in info.timings)
+      .map((k) => `${names[k]} ${info.timings[k].toFixed(1).replace(".", ",")} с`);
+    if (bits.length) line("Время: " + bits.join(" · "));
+  }
+  for (const s of sources) {
+    const item = document.createElement("div");
+    item.className = "src" + (used.includes(s.n) ? "" : " unused");
+    item.dataset.n = s.n;
+    const top = document.createElement("div");
+    top.className = "head";
+    const num = document.createElement("span");
+    num.className = "num";
+    num.textContent = `[${s.n}]`;
+    const title = document.createElement("span");
+    title.className = "title";
+    title.textContent = s.title;
+    const where = document.createElement("span");
+    where.className = "where";
+    const marks = [];
+    if (s.kind === "датасет") marks.push("сводка по всем статьям");
+    else if (s.feature) marks.push(`доказательство: ${s.feature}`);
+    else if (s.found_by === "граф") marks.push("из графа");
+    if (s.part && info.parts && info.parts.length) marks.push(`часть ${s.part}`);
+    if (s.round > 1) marks.push(`круг ${s.round}`);
+    if (!used.includes(s.n)) marks.push("не использован");
+    where.textContent = [sourceWhere(s), ...marks].filter(Boolean).join(" · ");
+    top.append(num, title, where);
+
+    const body = document.createElement("div");
+    body.className = "body";
+    body.hidden = true;
+    const text = document.createElement("p");
+    text.className = "text";
+    text.textContent = s.text.length > 900 ? s.text.slice(0, 900) + "…" : s.text;
+    const links = document.createElement("div");
+    links.className = "links";
+    const full = document.createElement("button");
+    full.type = "button"; full.className = "open"; full.textContent = "Разбор статьи целиком";
+    const parsed = document.createElement("div");
+    parsed.className = "parsed"; parsed.hidden = true;
+    full.addEventListener("click", () => {
+      parsed.hidden = !parsed.hidden;
+      if (!parsed.hidden && !parsed.childElementCount) fillParsed(parsed, s.doc_id, s.ord);
+    });
+    if (s.kind !== "датасет") links.append(full);
+    const onGraph = document.createElement("button");
+    onGraph.type = "button"; onGraph.className = "open"; onGraph.textContent = "На графе";
+    onGraph.addEventListener("click", () =>
+      s.kind === "датасет" ? focusNode("сущность:" + s.doc_id.replace(/^датасет:/, ""))
+        : focusArticle(s.doc_id));
+    links.append(onGraph);
+    if (s.url) {
+      const a = document.createElement("a");
+      a.href = s.url; a.target = "_blank"; a.rel = "noopener";
+      a.textContent = "открыть у издателя ↗";
+      links.append(a);
+    }
+    body.append(text, links, parsed);
+    top.addEventListener("click", () => { body.hidden = !body.hidden; });
+    item.append(top, body);
+    box.append(item);
+  }
+  return box;
+}
+
+// Связи, которые граф выписал из процитированных фрагментов. Ответ строит поиск по
+// фрагментам; граф здесь — карта: щёлкнуть имя и копаться дальше на вкладке графа.
+const LINKS_SHOWN = 8;
+
+function renderGraphLinks(bot, sources, used) {
+  const box = document.createElement("div");
+  box.className = "graph-links";
+  box.hidden = true;
+  const cited = sources.filter((s) => s.chunk_id && used.includes(s.n));
+  const pool = cited.length ? cited : sources.filter((s) => s.chunk_id);
+  if (!pool.length) return box;
+  fetch(withKb("/api/facts?chunks=" + pool.map((s) => s.chunk_id).join(",")))
+    .then((r) => r.json())
+    .then((data) => fillGraphLinks(bot, box, pool, (data && data.chunks) || {}, !cited.length))
+    .catch(() => {});
+  return box;
+}
+
+function fillGraphLinks(bot, box, pool, byChunk, uncited) {
+  const rows = [];
+  for (const s of pool) {
+    for (const f of byChunk[String(s.chunk_id)] || []) rows.push({ n: s.n, f });
+  }
+  if (!rows.length) return;
+  const head = document.createElement("div");
+  head.className = "sub";
+  head.textContent = `Связи из графа · ${rows.length}`;
+  const hint = document.createElement("div");
+  hint.className = "hint";
+  hint.textContent = (uncited ? "Из найденных фрагментов" : "Из фрагментов, на которые ссылается ответ") +
+    ": щёлкните имя — откроется на графе, номер — сам фрагмент.";
+  box.append(head, hint);
+  const line = (n, f) => {
+    const div = document.createElement("div");
+    div.className = "gl";
+    div.title = "«" + f.quote + "»";
+    const num = document.createElement("span");
+    num.className = "n";
+    num.textContent = `[${n}]`;
+    num.addEventListener("click", () => openSource(bot, n));
+    const ent = (name, id) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "ent";
+      b.textContent = name;
+      b.addEventListener("click", () => focusNode(id));
+      return b;
+    };
+    const rel = document.createElement("span");
+    rel.className = "rel";
+    rel.textContent = "— " + f.relation + " →";
+    div.append(num, ent(f.src, f.src_id), rel, ent(f.dst, f.dst_id));
+    return div;
+  };
+  rows.slice(0, LINKS_SHOWN).forEach((r) => box.append(line(r.n, r.f)));
+  if (rows.length > LINKS_SHOWN) {
+    const more = document.createElement("details");
+    const sum = document.createElement("summary");
+    sum.textContent = `ещё ${rows.length - LINKS_SHOWN}`;
+    more.append(sum);
+    rows.slice(LINKS_SHOWN).forEach((r) => more.append(line(r.n, r.f)));
+    box.append(more);
+  }
+  box.hidden = false;
+}
+
+function openSource(bot, n) {
+  const item = bot.querySelector(`.src[data-n="${n}"]`);
+  if (!item) return;
+  item.querySelector(".body").hidden = false;
+  item.classList.add("flash");
+  setTimeout(() => item.classList.remove("flash"), 1200);
+  item.scrollIntoView({ block: "center", behavior: "smooth" });
+}
+
+function setBusy(on) {
+  chat.busy = on;
+  $("ask-send").textContent = on ? "Стоп" : "Спросить";
+}
+
+async function ask(question) {
+  question = question.trim();
+  if (!question || chat.busy) return;
+  $("examples").hidden = true;
+  $("chat-new").hidden = false;
+  $("ask").value = "";
+
+  const user = document.createElement("div");
+  user.className = "msg-user";
+  user.textContent = question;
+  const bot = document.createElement("div");
+  bot.className = "msg-bot";
+  const state = document.createElement("div");
+  state.className = "state";
+  state.textContent = "ищу в базе…";
+  const answer = document.createElement("div");
+  answer.className = "answer typing";
+  bot.append(state, answer);
+  $("chat").append(user, bot);
+  user.scrollIntoView({ block: "start", behavior: "smooth" });
+
+  setBusy(true);
+  const ctrl = new AbortController();
+  chat.abort = ctrl;
+  let text = "", sources = [], queries = [], general = null, done = null, error = null, info = {};
+  let removed = [], figures = [];
+  try {
+    const resp = await fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        question, history: chat.history, conflicts: $("opt-conflicts").checked,
+        fast: $("opt-fast").checked,
+        kb: KB.path === null ? undefined : KB.path,
+      }),
+      signal: ctrl.signal,
+    });
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    for (;;) {
+      const { value, done: end } = await reader.read();
+      if (end) break;
+      buffer += decoder.decode(value, { stream: true });
+      let cut;
+      while ((cut = buffer.indexOf("\n")) >= 0) {
+        const line = buffer.slice(0, cut).trim();
+        buffer = buffer.slice(cut + 1);
+        if (!line) continue;
+        const ev = JSON.parse(line);
+        if (ev.type === "status") {
+          state.textContent = ev.text[0].toUpperCase() + ev.text.slice(1);
+        } else if (ev.type === "sources") {
+          sources = ev.sources;
+          queries = ev.queries || [];
+          info = { parts: ev.parts || [], extra: ev.extra || [], missing: ev.missing || [],
+                   dataset: ev.dataset || null, rounds: ev.rounds || 1, checked: ev.checked || 0,
+                   graph: ev.graph || 0, conflicts: ev.conflicts || [],
+                   reranked: !!ev.reranked, fast: !!ev.fast,
+                   judged: ev.judged !== false };
+        } else if (ev.type === "general") {
+          general = ev;
+          bot.insertBefore(renderNotInBase(ev), state);
+          answer.classList.add("general");
+        } else if (ev.type === "token") {
+          text += ev.text;
+          answer.innerHTML = renderAnswer(text, sources.length);
+        } else if (ev.type === "revised") {
+          // Фразы без ссылки на фрагмент убраны: ответ показывается заново.
+          text = ev.text;
+          removed = ev.removed || [];
+          answer.innerHTML = renderAnswer(text, sources.length);
+        } else if (ev.type === "figures") {
+          figures = ev.figures || [];  // рисунки процитированных фрагментов — после ответа
+        } else if (ev.type === "done") {
+          done = ev;
+          info.timings = ev.timings || null;  // по этапам — известно только к концу ответа
+        } else if (ev.type === "error") {
+          error = ev.error;
+        }
+      }
+    }
+  } catch (e) {
+    error = e.name === "AbortError" ? "Остановлено." : "Сервер не ответил: " + e;
+  }
+  answer.classList.remove("typing");
+  state.remove();
+
+  if (error) {
+    const w = document.createElement("div");
+    w.className = "warn";
+    w.textContent = error;
+    bot.append(w);
+    if (/модел/i.test(error)) loadBotStatus();  // сервер модели молчит — обновить строку состояния
+  }
+  const used = done ? done.used : [];
+  if (figures.length) bot.append(renderFigures(figures));
+  if (sources.length && !general) {
+    bot.append(renderGraphLinks(bot, sources, used));
+    bot.append(renderSources(sources, used, queries, info));
+  }
+  if (removed.length) {
+    // Что убрано из ответа: фразы модели без ссылки на фрагмент статьи.
+    const d = document.createElement("details");
+    d.className = "removed";
+    const sum = document.createElement("summary");
+    sum.textContent = `Фраз без ссылки на фрагмент убрано: ${removed.length} — это слова модели, а не статей`;
+    d.append(sum);
+    const ul = document.createElement("ul");
+    for (const r of removed) {
+      const li = document.createElement("li");
+      li.textContent = r;
+      ul.append(li);
+    }
+    d.append(ul);
+    bot.append(d);
+  }
+  if (done && done.unknown && done.unknown.length) {
+    const w = document.createElement("div");
+    w.className = "warn";
+    w.textContent = `Модель сослалась на фрагменты, которых ей не давали: ${done.unknown.join(", ")}. ` +
+      "Эти утверждения базой не подтверждены.";
+    bot.append(w);
+  }
+  if (done && done.model) {
+    const foot = document.createElement("div");
+    foot.className = "bot-foot";
+    const bits = [`${done.model} · ${String(done.seconds).replace(".", ",")} с`];
+    if (done.mode === "без базы" && !done.off_topic) bits.push("ответ модели, не из базы знаний");
+    if (done.rounds > 1) bits.push(`поиск в ${done.rounds} круга`);
+    const [cited, claims] = done.coverage || [0, 0];
+    if (claims) bits.push(`ссылка на фрагмент — у ${cited} из ${claims} утверждений`);
+    if (claims && cited < claims) bits.push("остальные сверьте с источниками");
+    foot.textContent = bits.join(" · ");
+    bot.append(foot);
+  }
+  answer.addEventListener("click", (ev) => {
+    const c = ev.target.closest(".cite");
+    if (c && !c.classList.contains("bad")) openSource(bot, Number(c.dataset.n));
+  });
+  if (!text && !error) answer.remove();
+
+  if (text && !error) {
+    // mode — чтобы модель знала, что ответ «без базы» был из общих знаний, а не из статей.
+    chat.history.push({ role: "user", content: question },
+                      { role: "assistant", content: text, mode: done ? done.mode : null });
+    chat.history = chat.history.slice(-HISTORY_KEEP);
+  }
+  const cited = sources.filter((s) => used.includes(s.n)).map((s) => s.doc_id);
+  setCited(cited);
+  setBusy(false);
+  chat.abort = null;
+}
+
+$("ask-form").addEventListener("submit", (ev) => {
+  ev.preventDefault();
+  if (chat.busy) { if (chat.abort) chat.abort.abort(); return; }
+  ask($("ask").value);
+});
+$("ask").addEventListener("keydown", (ev) => {
+  if (ev.key === "Enter" && !ev.shiftKey && !ev.isComposing) {
+    ev.preventDefault();
+    if (!chat.busy) ask($("ask").value);
+  }
+});
+$("chat-new").addEventListener("click", () => {
+  if (chat.abort) chat.abort.abort();
+  chat.history = [];
+  $("chat").innerHTML = "";
+  $("examples").hidden = !$("examples").children.length;
+  $("chat-new").hidden = true;
+  setCited([]);
+  $("ask").focus();
+});
+
+// Статьи из ответа — на графе: обводка и подпись, как у найденного поиском.
+function setCited(docIds) {
+  net.cited = new Set(docIds.map((id) => "статья:" + id));
+  if (net.ctx) draw();
+  if (docIds.length && net.data) {
+    const onGraph = docIds.filter((id) => net.byId["статья:" + id]).length;
+    $("map-tip").textContent = onGraph
+      ? `На графе обведены статьи из последнего ответа: ${articles(onGraph)}.`
+      : "Статей из ответа на графе нет — возможно, граф давно не перестраивали (python kbrag.py graph).";
+  }
+}
+
+function focusArticle(docId) { focusNode("статья:" + docId); }
+
+// Показать узел на графе: из чата («На графе»), из списка найденного, из датасета.
+async function focusNode(id) {
+  if ($("panel-graph").hidden) showTab("graph");
+  if (net.loading) await net.loading;
+  let n = net.byId && net.byId[id];
+  if (!n && net.data && net.data.nodes.some((x) => x.id === id)) {
+    $("map-min").value = "1";                 // узел скрыт фильтром «Узлы» — снять фильтр
+    buildNet(true);
+    n = net.byId[id];
+  }
+  if (!n) {
+    $("map-tip").textContent = "Этого на графе нет — граф строится командой python kbrag.py graph.";
+    $("map-box").scrollIntoView({ block: "center", behavior: "smooth" });
+    return;
+  }
+  centerOn(n);
+  selectNode(n);
+  $("map-tip").textContent = nodeTip(n);
+  $("map-box").scrollIntoView({ block: "start", behavior: "smooth" });
+}
+
+loadKbs();
+loadStats();
+</script>
+</body>
+</html>

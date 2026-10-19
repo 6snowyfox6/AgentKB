@@ -1,0 +1,24 @@
+# Проверки кода без видеокарты и тяжёлых библиотек: CI (GitHub Actions) и быстрый
+# прогон на любой машине. Здесь нет docling, torch и моделей векторов — проверки, которым
+# они нужны, пропускаются сами (pytest.importorskip). Для работы проекта — requirements.txt.
+#
+#     python -m pip install -r requirements-dev.txt
+#     python -m pytest
+#     python -m ruff check kbrag kbrag.py tests
+#     python -m black --check kbrag kbrag.py tests
+#     python -m mypy -p kbrag && python -m mypy kbrag.py
+
+pyyaml>=6.0
+requests>=2.31
+psycopg[binary,pool]>=3.1
+pymupdf4llm>=1.26             # зонд и запасной парсер — на эталонных PDF (tests/data)
+pillow>=10.0                  # рисунки статей (chunks/figures.py); в полном — от docling
+
+mcp>=2.3,<3                   # MCP-сервер (kbrag/mcp_server.py)
+
+pytest>=8.0
+ruff>=0.16
+black>=26.0
+mypy>=2.0
+types-PyYAML
+types-requests

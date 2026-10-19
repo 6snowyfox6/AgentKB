@@ -1,0 +1,56 @@
+# Настройки проверок кода: ruff, black, mypy --strict.
+# Запуск всех трёх разом: python kbrag.py lint
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = [".venv", ".local"]
+cache-dir = ".local/cache/ruff"  # кэши — в .local, корень проекта чистый
+
+[tool.ruff.lint]
+# E/W — стиль, F — ошибки (неиспользуемое, неопределённое), B — частые ловушки,
+# UP — устаревшие конструкции, I — порядок импортов.
+select = ["E", "W", "F", "B", "UP", "I"]
+ignore = [
+    "E501",   # длину строк держит black
+    "B008",   # вызов в значении по умолчанию — так написаны dataclass-поля проекта
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["kbrag"]
+
+[tool.black]
+line-length = 100
+target-version = ["py312"]
+extend-exclude = "/(\\.venv|\\.local)/"
+
+[tool.pytest.ini_options]
+# Проверки — в tests/ (python kbrag.py test); база, модель и видеокарта не нужны.
+testpaths = ["tests"]
+cache_dir = ".local/cache/pytest"
+markers = ["slow: долго — разбор PDF docling'ом (идёт, только если docling установлен)"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+ignore_missing_imports = true   # docling, sentence-transformers, psycopg — без заглушек типов
+warn_unused_ignores = true
+exclude = ["^\\.venv/", "^\\.local/"]
+cache_dir = ".local/cache/mypy"
+
+# Тут type: ignore — на имена docling, которые есть не во всех его версиях. Без docling
+# (проверки в CI, requirements-dev.txt) они «лишние» — это не ошибка.
+[[tool.mypy.overrides]]
+module = ["kbrag.parse.parsers.docling", "kbrag.chunks.text"]
+warn_unused_ignores = false
+
+# PyMuPDF без аннотаций типов: вызовы из запасного парсера и зонда — не наша ошибка типов.
+[[tool.mypy.overrides]]
+module = [
+    "kbrag.parse.parsers.pymupdf",
+    "kbrag.parse.orchestrator.profile",
+    "kbrag.parse.orchestrator.textlayer",
+    "kbrag.library.meta",
+    "kbrag.library.objects",
+]
+disallow_untyped_calls = false

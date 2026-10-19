@@ -1,0 +1,5 @@
+# Концы строк в репозитории — LF у всех; на Windows git сам отдаёт CRLF, если так настроен.
+* text=auto eol=lf
+*.pdf binary
+*.png binary
+*.woff2 binary

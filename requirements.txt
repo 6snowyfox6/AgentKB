@@ -1,0 +1,55 @@
+# --- парсинг ---
+# Распознавание картинок (OCR) у обычных статей выключено (do_ocr=False), и движок OCR
+# не нужен: проверено 14.10.2026 — docling разбирает статью и при запрещённом импорте
+# easyocr. Он нужен только сканам с import --ocr — ставится отдельно, по выбору:
+#   pip install easyocr            (KBRAG_OCR_ENGINE=easyocr, по умолчанию)
+#   pip install rapidocr onnxruntime   (rapidocr)
+# или программа tesseract (tesseract) — docs/КОМАНДЫ.md, «Сканы».
+#
+# Верхние границы — по последней проверенной версии, а не по «следующей главной»:
+# docling выходит раз в 2–3 дня и меняет внутреннее устройство в обычных выпусках, а
+# проект настраивает модель формул через её класс (parse/parsers/docling.py,
+# _FORMULA_MODELS). Сменился класс — разбор останавливается (ParserSetupError), а не
+# портит формулы молча. Поднимать границу — после проверки на новой версии: класс
+# CodeFormulaVlmModel с полями expansion_factor и elements_batch_size на месте
+# (19.10.2026 проверено по колёсам docling-slim 2.126.0 и 2.140.0) и разбор
+# проверочных PDF с формулами даёт то же.
+docling>=2.126.0,<2.141
+docling-core[chunking]>=2.94.1,<2.103   # HybridChunker и токенайзеры; docling требует <3
+pymupdf4llm>=1.26             # запасной парсер
+
+# --- чанкинг / токенайзер ---
+# Токенайзер BGE-M3 (должен совпадать с моделью эмбеддинга). Неподходящие docling
+# выпуски 5.x (5.0–5.3, 5.13.0) исключает он сам; граница — последняя вышедшая.
+transformers>=4.44,<5.21
+
+# --- база знаний ---
+sentence-transformers>=3.0    # эмбеддинги BGE-M3 (1024 измерения, мультиязычная)
+psycopg[binary,pool]>=3.1     # PostgreSQL; binary — чтобы на Windows не собирать из исходников;
+                              # pool — пул соединений (index/db.py): страница и бот делят его
+
+# --- общее ---
+requests>=2.31                # сервер модели (vLLM) и Телеграм
+pyyaml>=6.0                   # настройки баз (config/kbs), синонимы, вопросы оценки, метаданные статей
+
+# --- Claude Code ---
+# MCP-сервер (kbrag/mcp_server.py, python kbrag.py mcp). В mcp 2 FastMCP переименован в
+# MCPServer — граница: проверено на 2.3.0 (19.10.2026).
+mcp>=2.3,<3
+
+# Примечания по окружению:
+#
+# 1. GPU: pip ставит сборку torch с CUDA автоматически. Если нужен конкретный
+#    рантайм, поставьте torch до docling:
+#       pip install torch --index-url https://download.pytorch.org/whl/cu124
+#
+# 2. Первый запуск docling скачивает модели разметки и TableFormer с HuggingFace.
+#    Для офлайн-машины прогрейте кэш заранее:  docling-tools models download
+
+# --- проверки кода (python kbrag.py lint; настройки — pyproject.toml) ---
+pytest>=8.0                   # python kbrag.py test
+ruff>=0.16
+black>=26.0
+mypy>=2.0
+types-PyYAML
+types-requests
