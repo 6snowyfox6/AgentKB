@@ -11,7 +11,7 @@
 pyyaml>=6.0
 requests>=2.31
 psycopg[binary,pool]>=3.1
-pymupdf4llm>=1.26             # зонд и запасной парсер — на эталонных PDF (tests/data)
+pymupdf4llm>=1.26,<2          # зонд и запасной парсер — на эталонных PDF (tests/data)
 pillow>=10.0                  # рисунки статей (chunks/figures.py); в полном — от docling
 
 mcp>=2.3,<3                   # MCP-сервер (kbrag/mcp_server.py)

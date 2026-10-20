@@ -9,7 +9,7 @@
 vLLM сам ставит одновременные запросы в одну пачку (continuous batching): несколько
 пользователей и несколько фрагментов графа считаются разом, без настроек.
 
-Адрес по умолчанию — localhost:8100 (на 8000 — веб-страница проекта); другой задаётся
+Адрес по умолчанию — 127.0.0.1:8100 (на 8000 — веб-страница проекта); другой задаётся
 переменной окружения KBRAG_LLM (например, если модель работает на сервере: http://сервер:8100).
 """
 
@@ -18,7 +18,9 @@ from __future__ import annotations
 import json
 import os
 import re
+import threading
 from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any
 
@@ -32,7 +34,8 @@ DEFAULT_MODEL = "qwen3-14b"
 # 16 ГБ; на машине мощнее — KBRAG_NUM_CTX в .local/settings.env (machine.py): его же
 # берёт docker-compose.yml, так что окно в коде и у сервера одно.
 NUM_CTX = integer("KBRAG_NUM_CTX", 12288, low=2048)
-LLM_HOST = os.environ.get("KBRAG_LLM", "").strip() or "http://localhost:8100"
+# 127.0.0.1, а не localhost — см. DEFAULT_DSN в index/db.py.
+LLM_HOST = os.environ.get("KBRAG_LLM", "").strip() or "http://127.0.0.1:8100"
 
 # Qwen3 по умолчанию сначала «думает» вслух — это в разы дольше, а рассуждать в
 # наших заданиях не о чем. vLLM выключает размышления так, через шаблон чата.
@@ -40,6 +43,118 @@ NO_THINK = {"chat_template_kwargs": {"enable_thinking": False}}
 
 THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
 INSTALL_HINT = "Запустите её: python kbrag.py start (модель грузится 1–2 минуты)."
+
+# --------------------------------------------------------------------------- #
+#  Сколько заданий модель вмещает сразу
+# --------------------------------------------------------------------------- #
+# Память vLLM под задания (KV-кэш) — общая на все одновременные запросы. На 16 ГБ это
+# 13 088 токенов: одно полное окно (12 288) или два обычных задания чат-бота. Сверх
+# этого vLLM вытесняет запросы и считает их заново: при двух людях сразу (каждый ответ —
+# ещё и несколько запросов параллельно) запросы стояли до таймаута и падали у обоих.
+# Поэтому запрос сначала берёт место в бюджете процесса — оценку своего задания и ответа
+# в токенах — и ждёт, пока место есть. Бюджет — у vLLM (/metrics), иначе
+# KBRAG_KV_TOKENS в .local/settings.env, иначе окно с запасом на ответ.
+KV_TOKENS = integer("KBRAG_KV_TOKENS", 0, low=0)
+CHARS_PER_TOKEN = 3  # у Qwen3: английский — около 4 знаков на токен, русский — 2,5–3
+IMAGE_TOKENS = 2000  # картинка до 1280 точек по стороне (chunks/figures.py)
+JSON_REPLY = 1024  # ответ JSON без max_tokens — с запасом
+STREAM_REPLY = 2048  # ответ потоком (чат-бот)
+RETRY_METRICS = 60.0  # с: vLLM не ответил про память — когда спросить снова
+_KV_BLOCKS = re.compile(r"vllm:cache_config_info\{[^}]*\}")
+
+
+def _tokens_of(messages: list[dict[str, Any]]) -> int:
+    """Оценка задания в токенах — по длине текста (без токенайзера: хватает для бюджета)."""
+    total = 0
+    for message in messages:
+        content = message.get("content")
+        if isinstance(content, str):
+            total += len(content) // CHARS_PER_TOKEN
+        elif isinstance(content, list):
+            for part in content:
+                if part.get("type") == "image_url":
+                    total += IMAGE_TOKENS
+                else:
+                    total += len(str(part.get("text") or "")) // CHARS_PER_TOKEN
+        total += 8  # служебные токены сообщения
+    return total
+
+
+def _kv_from_metrics(host: str) -> int | None:
+    """Память vLLM под задания, токенов: num_gpu_blocks × block_size из /metrics."""
+    import requests
+
+    try:
+        text = requests.get(f"{host.rstrip('/')}/metrics", timeout=3).text
+    except Exception:  # noqa: BLE001 — сервер не vLLM или не отвечает
+        return None
+    found = _KV_BLOCKS.search(text)
+    if not found:
+        return None
+    labels = dict(re.findall(r'(\w+)="([^"]*)"', found.group(0)))
+    try:
+        return int(labels["num_gpu_blocks"]) * int(labels["block_size"])
+    except (KeyError, ValueError):
+        return None
+
+
+class Budget:
+    """Места под задания у одного сервера модели: hold(n) ждёт, пока занято + n
+    влезает в size. Задание больше всего бюджета пускается, когда больше никого нет."""
+
+    def __init__(self, size: int) -> None:
+        self.size = max(1, size)
+        self.used = 0
+        self._cond = threading.Condition()
+
+    @contextmanager
+    def hold(self, tokens: int) -> Iterator[None]:
+        tokens = max(1, min(tokens, self.size))
+        with self._cond:
+            while self.used and self.used + tokens > self.size:
+                self._cond.wait()
+            self.used += tokens
+        try:
+            yield
+        finally:
+            with self._cond:
+                self.used -= tokens
+                self._cond.notify_all()
+
+    def resize(self, size: int) -> None:
+        with self._cond:
+            self.size = max(1, size)
+            self._cond.notify_all()
+
+
+_BUDGETS: dict[str, Budget] = {}
+_ASKED: dict[str, float] = {}  # сервер → когда vLLM не ответил про память
+_BUDGETS_LOCK = threading.Lock()
+
+
+def budget(host: str) -> Budget:
+    """Бюджет сервера модели — один на процесс. Пока vLLM не сказал, сколько у него
+    памяти (не запущен, не vLLM), — временный, по окну, и раз в минуту спросить снова."""
+    import time
+
+    with _BUDGETS_LOCK:
+        found = _BUDGETS.get(host)
+        unknown_since = _ASKED.get(host)
+        if found is not None and (
+            unknown_since is None or time.monotonic() - unknown_since < RETRY_METRICS
+        ):
+            return found
+        size = KV_TOKENS or _kv_from_metrics(host)
+        if size:
+            _ASKED.pop(host, None)
+        else:
+            _ASKED[host] = time.monotonic()
+            size = NUM_CTX + STREAM_REPLY
+        if found is None:
+            found = _BUDGETS[host] = Budget(size)
+        else:
+            found.resize(size)  # тот же объект: кто уже держит место, отдаст его сюда же
+        return found
 
 
 class LLMError(RuntimeError):
@@ -105,9 +220,12 @@ class LLM:
         payload["response_format"] = {"type": "json_object"}
         if max_tokens:
             payload["max_tokens"] = max_tokens
-        response = requests.post(
-            self._url("/chat/completions"), json=payload, timeout=timeout or self.timeout
-        )
+        need = _tokens_of(payload["messages"]) + (max_tokens or JSON_REPLY)
+        # Таймаут — на сам запрос: очередь за местом в бюджете в него не входит.
+        with budget(self.host).hold(need):
+            response = requests.post(
+                self._url("/chat/completions"), json=payload, timeout=timeout or self.timeout
+            )
         response.raise_for_status()
         message = response.json()["choices"][0]["message"]
         return extract_json(message.get("content") or "")
@@ -122,10 +240,15 @@ class LLM:
 
         Картинка в сообщении — частью {"type": "image_url", "image_url": {"url":
         "data:image/png;base64,…"}}, как в протоколе OpenAI."""
-        import requests
-
         payload = self._payload(messages, temperature)
         payload.update(stream=True, stream_options={"include_usage": True})
+        # Место в бюджете — до конца ответа: генератор закрыли («Стоп») — оно освобождается.
+        with budget(self.host).hold(_tokens_of(messages) + STREAM_REPLY):
+            yield from self._stream(payload)
+
+    def _stream(self, payload: dict[str, Any]) -> Iterator[dict[str, Any]]:
+        import requests
+
         try:
             response = requests.post(
                 self._url("/chat/completions"),

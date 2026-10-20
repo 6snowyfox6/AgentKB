@@ -43,6 +43,7 @@ JUDGE_MAX = 12
 # суммы. Кандидаты у пачек разные, поэтому «уже отобрано» каждой — на начало круга.
 JUDGE_WORKERS = 4
 CANDIDATE_PER_DOC = 3  # кандидатов из одной статьи в наборе (пока есть другие)
+TRANSLATED = 6  # кандидатов по вопросу в переводе (plan.translated) сверх основных
 JUDGE_SLACK = 4  # короткий хвост пачки читается вместе с предыдущей
 CANDIDATE_CHARS = 1000
 MAX_ROUNDS = 3  # кругов поиска самое большее
@@ -54,6 +55,7 @@ EXTRA_QUERIES = 3  # новых запросов за круг
 # вопрос — меньше RERANK_ENOUGH; тогда она говорит, чего не хватает, и даёт запросы.
 RERANK_MIN = 0.2
 RERANK_ENOUGH = 3
+RERANK_SPARE = 8  # кусков общей выдачи сверх набора, без предела на статью, — реранкеру
 AUTO = "auto"  # реранкер — общий на процесс, если включён в настройках (Settings.rerank)
 # Новый запрос, почти совпадающий по основам слов с уже сделанным, не ищется:
 # он приносит те же фрагменты, а круг стоит вызова модели.
@@ -365,6 +367,25 @@ def retrieve(
     # набирала 7 мест из 16. Других статей мало — лишние куски той же добирают места.
     for h, part, rnd in spare[: max(0, WIDE - len(pool))]:
         add([h], part, rnd, capped=False)
+    # Реранкер читает быстро — ему ещё RERANK_SPARE кусков из общей выдачи, без предела
+    # на статью: аннотация с ответом шла четвёртым куском своей статьи после трёх таблиц
+    # и в набор не попадала, а реранкер ставит её первой (0,93 против 0,5–0,7 у таблиц;
+    # стресс-тест 20.10.2026). Выдача уже посчитана (cache) — это без новых запросов.
+    if reranker is not None:
+        more = [
+            h for h in merged_search(conn, embedder, plan.queries, cache, kb) if is_candidate(h)
+        ]
+        added = 0
+        for h in more:
+            if added >= RERANK_SPARE:
+                break
+            added += len(add([h], None if multi else 1, 1, capped=False))
+    # Вопрос в переводе на языки статей базы (plan.translated) — своя небольшая добавка,
+    # после добора: нужное на китайском или японском приходит, а места кусков основной
+    # статьи не занимает (иначе из выдачи выпадала аннотация с ответом).
+    if plan.translated:
+        translated = candidates(conn, embedder, plan.translated, cache, TRANSLATED, kb)
+        add(translated, None if multi else 1, 1)
 
     if reranker is not None:
         found = yield from reranked_rounds(
@@ -475,6 +496,15 @@ def _finish(
     return result
 
 
+_CJK = re.compile("[぀-ヿ㐀-䶿一-鿿가-힯]")
+CJK_SHARE = 0.3  # иероглифов среди непробельных знаков — текст на CJK
+
+
+def is_cjk(text: str) -> bool:
+    letters = sum(not ch.isspace() for ch in text)
+    return bool(letters) and len(_CJK.findall(text)) >= CJK_SHARE * letters
+
+
 def rerank_batch(
     reranker: Any, question: str, plan: Plan, batch: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
@@ -496,6 +526,17 @@ def rerank_batch(
         ]
         for c, score in zip(items, reranker.score(asked, texts), strict=True):
             c["rerank"] = round(score, 4)
+    # Китайский и японский текст реранкер с русским вопросом сравнивает плохо: кусок с
+    # ответом об Илийском бассейне получал 0,02–0,10 при пороге 0,2, а с вопросом
+    # по-китайски — 0,82. Такой кусок оценивается ещё и по вопросу в переводе, лучшее.
+    cjk = [c for c in batch if is_cjk(c["hit"].text)]
+    if cjk and plan.translated:
+        texts = [
+            f"{c['hit'].title}\n{' '.join(c['hit'].text.split())[:CANDIDATE_CHARS]}" for c in cjk
+        ]
+        for query in plan.translated:
+            for c, score in zip(cjk, reranker.score(query, texts), strict=True):
+                c["rerank"] = max(c.get("rerank", 0.0), round(score, 4))
     good = [c for c in batch if c.get("rerank", 0.0) >= RERANK_MIN]
     return sorted(good, key=lambda c: -c["rerank"])
 

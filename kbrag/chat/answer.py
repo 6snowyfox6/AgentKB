@@ -39,12 +39,18 @@
      "rounds": 1–3, "checked": N, "judged": true|false}
     {"type": "general", "queries": […], "text": "…", …}     в базе нет — ответ без неё
                                                             (off_topic: true — вопрос не по
-                                                            теме базы: только отказ, без ответа)
+                                                            теме базы: только отказ, без ответа;
+                                                            not_found: true — по теме, но общие
+                                                            знания базе выключены: тоже отказ)
     {"type": "token", "text": "…"}                          кусок ответа, много раз
-    {"type": "revised", "text": "…", "removed": […]}       ответ целиком без фраз без
-                                                            ссылки на фрагмент (drop_uncited)
+    {"type": "revised", "text": "…", "removed": […],       ответ целиком без фраз без
+     "unsupported": […], "rescued": N, "recited": N}         ссылки (drop_uncited) и без
+                                                            неподтверждённых фрагментом
+                                                            (support.py); rescued — фраз,
+                                                            получивших ссылку по числам,
+                                                            recited — переставленных ссылок
     {"type": "done", "mode": "база"|"без базы", "used": [1, 3], "unknown": [],
-     "coverage": [5, 6], "removed": 2, "rounds": …,
+     "coverage": [5, 6], "removed": 2, "unsupported": 1, "recited": 0, "rounds": …,
      "articles": [{"doc_id", "title", "authors", "year", "journal", "doi", "url",
                    "fragments": [1, 3], "pages": [4, 5], "pdf": true}, …],
      "timings": {"plan": с, "search": с, "judge": с, "conflicts": с, "answer": с}, …}
@@ -66,13 +72,14 @@ from ..kb import get as get_kb
 from ..llm import LLM, LLM_HOST, LLMError
 from ..paths import LOGS
 from . import references
-from .checks import NO_ANSWER, citations, coverage, drop_uncited, is_refusal
+from .checks import NO_ANSWER, citations, cite_by_numbers, coverage, drop_uncited, is_refusal
 from .conflicts import find_conflicts
 from .dataset import collect_dataset, dataset_sources, graph_candidates
 from .messages import build_messages, fit_budget, general_messages
 from .plan import Plan, is_follow_up, make_plan, plan_question, search_query
 from .retrieval import AUTO, MAX_ROUNDS, Retrieval, judge_fragments, retrieve
 from .settings import MODEL, Settings
+from .support import check_support
 
 NOT_IN_BASE = (
     "По вашему запросу в базе знаний такой информации нет. Ниже — ответ модели "
@@ -83,6 +90,15 @@ NOT_IN_BASE = (
 # (раньше выдавал, например, рецепт хлеба). Вернуть старое — Settings.general_off_topic.
 # Текст отказа — «отказ_не_по_теме» в настройках базы (kb.yaml, раздел «тема»).
 OFF_TOPIC = "отказ_не_по_теме"
+
+# Вопрос по теме, а в базе ответа нет: без ответа из общих знаний, если базе это
+# запрещено (kb.yaml: общие_знания: false). Стресс-тест 20.10.2026: такой ответ на
+# «сколько статей про Марокко» сочинил геологию Марокко — с пометкой, но вредно.
+GENERAL_KEY = "общие_знания"
+NOT_FOUND = (
+    "По вашему запросу в базе знаний такой информации нет. Ответ из общих знаний модели "
+    "для этой базы выключен. Можно спросить иначе: другими словами, с терминами по-английски."
+)
 
 
 # --------------------------------------------------------------------------- #
@@ -113,6 +129,7 @@ STAGES = {
     "judge": "отбор",
     "conflicts": "сверка",
     "answer": "ответ",
+    "support": "проверка ссылок",
 }
 
 
@@ -153,11 +170,12 @@ class Prepared:
     dataset: dict[str, Any] | None = None
     graph: int = 0  # сколько кандидатов дал граф (вопрос о названном предмете)
     timings: dict[str, float] = field(default_factory=dict)  # plan, search, judge — секунды
+    catalog: list[dict[str, Any]] | None = None  # каталожный вопрос: найденные статьи
 
     def info(self) -> dict[str, Any]:
         plan = self.plan
         return {
-            "queries": plan.queries + plan.extra,
+            "queries": plan.queries + plan.translated + plan.extra,
             "standalone": plan.standalone,
             "graph": self.graph,
             "parts": plan.describe() if len(plan.parts) > 1 else [],
@@ -187,6 +205,60 @@ def _overview_sources(conn: Any, embedder: Any, question: str, kb: str) -> list[
         return []
 
 
+def _catalog_answer(
+    conn: Any,
+    question: str,
+    prepared: Prepared,
+    kb: Any,
+    settings: Settings,
+    started: float,
+    info: dict[str, Any],
+) -> Generator[dict[str, Any], None, None]:
+    """Ответ на каталожный вопрос: текст (число, как считалось, список) и те же статьи
+    списком литературы — на странице он со ссылками на DOI и PDF вместо списка в тексте."""
+    from .catalog import LIST_MAX, describe, note
+
+    found = prepared.catalog or []
+    query = prepared.plan.catalog
+    head, listing = describe(query, found, kb.title if settings.kb else "Все базы")
+    text = f"{head}\n\n{listing}" if listing else head
+    items = [
+        dict(a, fragments=[], pages=[], pdf=False, note=note(a, query)) for a in found[:LIST_MAX]
+    ]
+    try:
+        items = references.enrich(conn, items) if items else items
+    except Exception:  # noqa: BLE001 — без PDF список всё равно полезен
+        pass
+    yield {"type": "token", "text": text}
+    timings = dict(prepared.timings)
+    seconds = round(time.monotonic() - started, 1)
+    log_timings(question, timings, seconds, "каталог")
+    yield {
+        "type": "done",
+        "mode": "каталог",
+        "catalog": {"head": head, "count": len(found)},
+        "used": [],
+        "unknown": [],
+        "coverage": [0, 0],
+        "articles": items,
+        "model": settings.model,
+        "seconds": seconds,
+        "timings": timings,
+        "tokens": None,
+        **info,
+    }
+
+
+def _catalog_articles(conn: Any, query: Any, kb: str) -> list[dict[str, Any]]:
+    """Статьи по каталожному вопросу (catalog.find); заглушка в проверках — пусто."""
+    from ..index import db
+    from .catalog import find
+
+    if not db.is_real(conn):
+        return []
+    return find(conn, query, kb)
+
+
 def prepare(
     conn: Any,
     embedder: Any,
@@ -199,6 +271,7 @@ def prepare(
     graph_hits: Any = graph_candidates,
     reranker: Any = AUTO,
     overview: Any = None,
+    catalog: Any = None,
 ) -> Generator[Any, Any, Any]:
     """Разбор вопроса и поиск с моделью. Генератор событий status; в конце — Prepared.
     overview(conn, embedder, вопрос, kb) — источники обзорного вопроса (резюме статей);
@@ -208,6 +281,8 @@ def prepare(
     BGE-M3 и так находит статьи на других языках), отбирает реранкер без модели."""
     if overview is None:
         overview = _overview_sources
+    if catalog is None:
+        catalog = _catalog_articles
     if settings.fast:
         planner, judge = quick_plan, None
     else:
@@ -215,6 +290,19 @@ def prepare(
     started = time.monotonic()
     plan = make_plan(question, history, settings, planner)
     planned = time.monotonic()
+
+    # Вопрос о самом наборе статей («сколько статей про…», «перечисли статьи…») — по всей
+    # базе, по названиям и тексту (catalog.py), а не по 8 фрагментам.
+    # «По теме» тут не спрашивается: «какие статьи Иваситы есть» модель считала вопросом не
+    # о предмете базы, а о статьях — и отказывала. Не по теме — поиск просто найдёт 0.
+    if plan.catalog is not None and catalog is not None:
+        yield {"type": "status", "text": "считаю статьи базы…"}
+        found = catalog(conn, plan.catalog, settings.kb)
+        timings = {
+            "plan": round(planned - started, 2),
+            "search": round(time.monotonic() - planned, 2),
+        }
+        return Prepared(plan, [], Retrieval([], judged=False), timings=timings, catalog=found)
 
     # «Собрать всё» о предмете вопроса — из датасета; поиск только добавляет.
     data = None
@@ -272,6 +360,7 @@ def answer(
     prepared: Prepared | None = None,
     conflicts: Any = find_conflicts,
     reranker: Any = AUTO,
+    support: Any = check_support,
 ) -> Generator[dict[str, Any], None, None]:
     """Ответ на вопрос событиями (см. начало файла).
 
@@ -305,6 +394,10 @@ def answer(
     info["fast"] = settings.fast
     timings = dict(prepared.timings)
     kb = get_kb(settings.kb)
+
+    if prepared.catalog is not None:
+        yield from _catalog_answer(conn, question, prepared, kb, settings, started, info)
+        return
 
     def spent(stage: str, since: float) -> None:
         timings[stage] = round(timings.get(stage, 0.0) + time.monotonic() - since, 2)
@@ -364,14 +457,41 @@ def answer(
                         text += part["text"]
                         yield {"type": "token", "text": part["text"]}
                 spent("answer", asked)
-                # Фразы без ссылки на фрагмент — не из статей: ответ заменяется
-                # очищенным, убранное показывается отдельно.
-                cleaned, removed = drop_uncited(text)
-                if removed and cleaned:
+                # Фраза без ссылки, все числа которой есть в одном фрагменте, — ссылка на
+                # него; прочие фразы без ссылки — не из статей, они убираются.
+                cleaned, rescued = cite_by_numbers(text, sources)
+                cleaned, removed = drop_uncited(cleaned)
+                if not cleaned:
+                    cleaned, removed = text, []
+                # Подтверждает ли фрагмент утверждение со ссылкой на него (support.py).
+                unsupported: list[str] = []
+                recited = 0
+                real_check = support is not check_support or llm is stream_llm
+                if support is not None and settings.check_support and not settings.fast:
+                    if real_check:
+                        yield {
+                            "type": "status",
+                            "text": "проверяю, что ссылки подтверждают сказанное…",
+                        }
+                        since = time.monotonic()
+                        checked, unsupported, recited = support(
+                            question, cleaned, sources, settings
+                        )
+                        spent("support", since)
+                        if checked:
+                            cleaned = checked
+                        else:
+                            unsupported = []
+                if cleaned != text:
                     text = cleaned
-                    yield {"type": "revised", "text": text, "removed": removed}
-                else:
-                    removed = []
+                    yield {
+                        "type": "revised",
+                        "text": text,
+                        "removed": removed,
+                        "unsupported": unsupported,
+                        "rescued": len(rescued),
+                        "recited": recited,
+                    }
                 used, unknown = citations(text, len(sources))
                 cited, claims = coverage(text)
                 yield {
@@ -383,6 +503,8 @@ def answer(
                     # Статьи, на которые опирается ответ (chat/references.py).
                     "articles": references.articles(conn, sources, used),
                     "removed": len(removed),
+                    "unsupported": len(unsupported),
+                    "recited": recited,
                     "model": settings.model,
                     **closing("база"),
                     "tokens": tokens,
@@ -409,6 +531,23 @@ def answer(
             **closing("не по теме"),
             "tokens": None,
             "off_topic": True,
+            **info,
+        }
+        return
+
+    if not kb.settings.get(GENERAL_KEY, True):
+        # По теме, но в базе пусто, а общие знания базе запрещены — так и сказать.
+        yield {"type": "general", "text": NOT_FOUND, "not_found": True, **info}
+        yield {
+            "type": "done",
+            "mode": "без базы",
+            "used": [],
+            "unknown": [],
+            "coverage": [0, 0],
+            "model": settings.model,
+            **closing("не найдено"),
+            "tokens": None,
+            "not_found": True,
             **info,
         }
         return

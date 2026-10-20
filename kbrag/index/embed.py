@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import threading
+from collections.abc import Callable
 from typing import Any
 
 VECTOR_DIM = 1024
@@ -65,6 +66,26 @@ def _auto_device() -> str:
     return "cuda" if free >= GPU_FREE_NEEDED else "cpu"
 
 
+def offline_first[T](load: Callable[[], T]) -> T:
+    """Загрузить модель из кэша Hugging Face, не спрашивая сеть; нет в кэше — скачать.
+
+    local_files_only помогает не везде: sentence-transformers всё равно спрашивает Hub
+    про отдельные файлы модели. При медленной связи с ним каждый такой запрос — до
+    минуты (20.10.2026: вопрос в чат-боте искался 245 с, из них 242 — рукопожатия с
+    huggingface.co). Поэтому на время загрузки Hub выключается целиком."""
+    from huggingface_hub import constants
+
+    before = constants.HF_HUB_OFFLINE
+    constants.HF_HUB_OFFLINE = True
+    try:
+        return load()
+    except (OSError, ValueError):  # ещё не скачана
+        pass
+    finally:
+        constants.HF_HUB_OFFLINE = before
+    return load()
+
+
 class Embedder:
     """BGE-M3 через sentence-transformers, на видеокарте или процессоре."""
 
@@ -102,12 +123,7 @@ class Embedder:
         from sentence_transformers import SentenceTransformer
 
         device = _auto_device() if self.device == "auto" else self.device
-        # Модель давно скачана: без local_files_only каждая загрузка спрашивает
-        # Hugging Face про новую версию — 8 с вместо 3 и падение без сети.
-        try:
-            model = SentenceTransformer(self.model_id, device=device, local_files_only=True)
-        except (OSError, ValueError):  # ещё не скачана — качаем
-            model = SentenceTransformer(self.model_id, device=device)
+        model = offline_first(lambda: SentenceTransformer(self.model_id, device=device))
         model.max_seq_length = self.max_length
         # fp16 на видеокарте — втрое быстрее и вдвое меньше памяти. Векторы те же:
         # косинус с fp32 не ниже 0,9997, первые 10 в выдаче совпадают. Поэтому

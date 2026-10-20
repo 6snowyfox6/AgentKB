@@ -40,7 +40,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, quote, urlparse
 
-from .. import acl
+from .. import acl, turns
 from ..chat import answer as chat
 from ..chat.settings import Settings
 from ..common import add_db_args, add_embedder_args, add_llm_args, kb_from_args
@@ -315,8 +315,19 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-cache")
         self.end_headers()
         events = None
+
+        def queued(place: int) -> None:
+            # Раз в пару секунд, пока ждёт: страница видит место, а ушедший со страницы
+            # (запись падает) снимается с очереди.
+            text = f"модель отвечает другим — вы в очереди, перед вами {place}…"
+            line = {"type": "status", "text": text}
+            self.wfile.write((json.dumps(line, ensure_ascii=False) + "\n").encode("utf-8"))
+            self.wfile.flush()
+
         try:
-            with db.connect(State.dsn) as conn:
+            # Очередь ответов — общая с Телеграм-ботом (turns.py); соединение с базой —
+            # только когда очередь подошла: ждущие не занимают пул.
+            with turns.turn(on_wait=queued), db.connect(State.dsn) as conn:
                 db.autocommit(conn)  # ответ пишется минутами — без открытой транзакции
                 events = chat.answer(
                     conn, State.embedder, str(payload.get("question") or ""), history, settings
@@ -749,6 +760,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--tg", action="store_true", help="заодно запустить Телеграм-бота (модель векторов общая)"
     )
+    parser.add_argument(
+        "--remote",
+        action="store_true",
+        help="ещё и для других машин: страница и MCP по HTTP по адресу Tailscale (remote.py)",
+    )
     add_llm_args(parser)
     args = parser.parse_args(argv)
 
@@ -762,6 +778,10 @@ def main(argv: list[str] | None = None) -> int:
             f"(Ctrl+C) и запустите заново — или другой порт: --port {args.port + 1}",
             file=sys.stderr,
         )
+        return 1
+    remote = _remote_servers(args.port) if args.remote else None
+    if args.remote and remote is None:
+        server.server_close()
         return 1
 
     State.dsn = args.dsn
@@ -817,6 +837,8 @@ def main(argv: list[str] | None = None) -> int:
         f"Чат-бот: {State.chat_settings.model} — " + ("готов" if status["ok"] else status["error"])
     )
     print(f"\nГотово: {address}")
+    if remote is not None:
+        _start_remote(remote, args.port)
     print("Остановить — Ctrl+C\n")
 
     if not args.no_browser:
@@ -830,7 +852,58 @@ def main(argv: list[str] | None = None) -> int:
         print("Остановлен.")
     finally:
         server.server_close()
+        if remote is not None:
+            remote.page.server_close()
+            remote.mcp.should_exit = True
     return 0
+
+
+# --------------------------------------------------------------------------- #
+#  Удалённый доступ (--remote): страница и MCP по адресу Tailscale
+# --------------------------------------------------------------------------- #
+class Remote:
+    def __init__(self, address: Any, page: Server, mcp: Any) -> None:
+        self.address = address
+        self.page = page  # та же страница, ещё одним слушателем — на адресе Tailscale
+        self.mcp = mcp  # uvicorn.Server с MCP по HTTP
+
+
+def _remote_servers(port: int) -> Remote | None:
+    """Слушатели для других машин — или None (почему — уже напечатано). Только по
+    токенам: без людей в .local/access.yaml удалённо не открывается ничего."""
+    from .. import mcp_server
+    from .. import remote as tailnet
+
+    problem = mcp_server.check_remote()
+    address, why = tailnet.find()
+    if problem or address is None:
+        print(f"Удалённый доступ не включён: {problem or why}", file=sys.stderr)
+        return None
+    try:
+        page = Server((address.ip, port), Handler)
+    except OSError as exc:
+        print(f"Адрес {address.ip}:{port} не занять: {exc}", file=sys.stderr)
+        return None
+    mcp_server.BASE = f"http://127.0.0.1:{port}"  # MCP ходит в эту же страницу, локально
+    mcp = mcp_server.serve_http(address.ip, mcp_server.HTTP_PORT, list(address.names))
+    return Remote(address, page, mcp)
+
+
+def _start_remote(remote: Remote, port: int) -> None:
+    import threading
+
+    from .. import mcp_server
+
+    threading.Thread(target=remote.page.serve_forever, name="remote-page", daemon=True).start()
+    threading.Thread(target=remote.mcp.run, name="remote-mcp", daemon=True).start()
+    host = remote.address.names[0] if remote.address.names else remote.address.ip
+    print(
+        f"\nУдалённо (Tailscale, только по токену из .local/access.yaml):\n"
+        f"  страница:  http://{host}:{port}/?token=ТОКЕН   (один раз — потом помнит браузер)\n"
+        f"  Claude Code на другой машине:\n"
+        f"    claude mcp add --transport http kbrag http://{host}:{mcp_server.HTTP_PORT}/mcp "
+        f'--header "Authorization: Bearer ТОКЕН"'
+    )
 
 
 if __name__ == "__main__":

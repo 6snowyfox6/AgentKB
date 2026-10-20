@@ -45,6 +45,23 @@ def test_subtree_filter(name: str, kb: str, filtered: bool) -> None:
         assert all(p.get("kb") == kb for q, p in conn.log if "document_kbs" in q)
 
 
+@pytest.mark.parametrize(
+    ("kb", "found", "exact"), [("", 10, False), ("a.b", 10, True), ("a.b", 10**6, False)]
+)
+def test_small_branch_searched_exactly(kb: str, found: int, exact: bool) -> None:
+    """Маленькая ветка — перебором, без HNSW; большая и вся база — по индексу."""
+
+    def answer(sql: str, params: Any) -> list[Any]:
+        return [(min(found, params["exact_max"]),)] if "count(*)" in sql else []
+
+    conn = FakeConn(answer=answer)
+    search.vector_search(conn, [0.1] * 4, 5, kb=kb)
+    sql = " ".join(q for q, _ in conn.log)
+    assert ("count(*)" in sql) is bool(kb)  # у корня без фильтра и считать нечего
+    assert ("<=> %(q)s::vector) + 0" in sql) is exact
+    assert ("hnsw." in sql) is not exact
+
+
 def test_assign_creates_ancestors() -> None:
     conn = FakeConn()
     db.assign(conn, ["d1"], "geology.ore.anabar")

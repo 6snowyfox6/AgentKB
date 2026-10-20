@@ -24,8 +24,10 @@ from ..machine import integer
 VECTOR_DIM = 1024  # BGE-M3
 
 # Порт 5433 — тот, что публикует docker-compose.yml, чтобы не спорить
-# с уже установленным на машине PostgreSQL на 5432.
-DEFAULT_DSN = "postgresql://kbrag:kbrag@localhost:5433/kbrag"
+# с уже установленным на машине PostgreSQL на 5432. 127.0.0.1, а не localhost:
+# на Windows localhost сначала пробует IPv6 (::1), а Docker публикует порт только
+# на 127.0.0.1 — каждое подключение ждёт ~10 с, и пул не успевает.
+DEFAULT_DSN = "postgresql://kbrag:kbrag@127.0.0.1:5433/kbrag"
 
 SCHEMA = """
 CREATE EXTENSION IF NOT EXISTS vector;

@@ -36,6 +36,8 @@ class Settings:
     general_off_topic: bool = False
     # Сверять, не расходятся ли статьи (find_conflicts): около 4 с на ответ.
     check_conflicts: bool = True
+    # Сверять утверждения ответа с их фрагментами (support.py): неподтверждённое — вон.
+    check_support: bool = True
     # Узел дерева баз (kb.py): поиск и граф — по его поддереву, промпты — из его настроек.
     kb: str = field(default_factory=default_path)
     # Отбор кандидатов реранкером (index/rerank.py), модель — только «чего не хватает».

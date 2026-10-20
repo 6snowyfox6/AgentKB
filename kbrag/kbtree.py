@@ -20,6 +20,7 @@ config/kbs (kb.yaml, синонимы, правила графа, вопросы
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import shutil
 import sys
@@ -35,7 +36,7 @@ TEMPLATE = """# НАСТРОЙКИ БАЗЫ {path} — {title}.
 # сказано, что значит каждое слово темы и в каком оно падеже. Достаточно написать
 # только своё. Правится Блокнотом, сохранять в UTF-8; действует сразу.
 
-название: {title}
+название: {title_yaml}
 
 # тема:
 #   пользователь: исследователя     # кого бот слушает, в родительном падеже
@@ -138,7 +139,11 @@ def cmd_create(args: Any) -> int:
         print(f"Папка настроек уже есть: {settings}")
     else:
         folder.mkdir(parents=True, exist_ok=True)
-        settings.write_text(TEMPLATE.format(path=path, title=title), encoding="utf-8")
+        # Название — в кавычках JSON (они же строка YAML): «eLSM: основа» без них не читается.
+        title_yaml = json.dumps(title, ensure_ascii=False)
+        settings.write_text(
+            TEMPLATE.format(path=path, title=title, title_yaml=title_yaml), encoding="utf-8"
+        )
         print(f"Настройки базы: {settings}")
     try:
         with _db(args) as conn:

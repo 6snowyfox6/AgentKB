@@ -29,6 +29,8 @@ r"""KBRAG — один вход для всех действий.
     tg                          только Телеграм-бот
     tg --check                  бот молчит? проверить токен, доступ, кто писал
     serve                       то же без браузера (только адреса /api)
+    web --remote                и для других машин: страница и MCP для Claude Code по адресу
+                                Tailscale, только по токенам (access add; docs/КОМАНДЫ.md)
     search "запрос"             найти фрагменты статей в терминале (--json — для скриптов)
     ask "вопрос"                спросить чат-бота в терминале (нужна модель; --json — для скриптов)
                                 (хотите подробно или кратко — так и напишите в вопросе)
@@ -258,7 +260,7 @@ def _llm_up(timeout: int = 5) -> bool:
         return False
 
 
-VISION = "http://localhost:8101"  # сервис vision (kbrag/chunks/figures.py, VISION_PORT)
+VISION = "http://127.0.0.1:8101"  # сервис vision (kbrag/chunks/figures.py, VISION_PORT)
 
 
 def _vision_mode() -> str:
@@ -472,12 +474,12 @@ def cmd_web(opts: argparse.Namespace) -> int:
     if not _ensure_database():
         return 1
     _ensure_llm(wait=False)
-    return _py(
-        "kbrag.web.server",
-        "--model",
-        MODEL,
-        *(["--tg"] if opts.tg else []),
-    )
+    return _py("kbrag.web.server", "--model", MODEL, *_web_flags(opts))
+
+
+def _web_flags(opts: argparse.Namespace) -> list[str]:
+    """--tg — и Телеграм-бот; --remote — страница и MCP ещё и для других машин (Tailscale)."""
+    return [*(["--tg"] if opts.tg else []), *(["--remote"] if opts.remote else [])]
 
 
 def cmd_serve(opts: argparse.Namespace) -> int:
@@ -485,8 +487,7 @@ def cmd_serve(opts: argparse.Namespace) -> int:
     if not _ensure_database():
         return 1
     _ensure_llm(wait=False)
-    args = ["--no-browser", "--model", MODEL]
-    return _py("kbrag.web.server", *args, *(["--tg"] if opts.tg else []))
+    return _py("kbrag.web.server", "--no-browser", "--model", MODEL, *_web_flags(opts))
 
 
 def cmd_graph(opts: argparse.Namespace) -> int:
@@ -741,6 +742,7 @@ def parse(argv: list[str]) -> argparse.Namespace:
     p.add_argument("--no-graph", action="store_true")
     p.add_argument("--workers", type=int, default=None)
     p.add_argument("--tg", action="store_true")
+    p.add_argument("--remote", action="store_true")
     p.add_argument("--verbose", action="store_true")
     p.add_argument("--check", action="store_true")
     p.add_argument("--ask", action="store_true")

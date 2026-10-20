@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -20,9 +19,8 @@ KEEP = 20  # сколько последних ответов и списков 
 SEARCH_HITS = 20
 HELP = ui.HELP
 
-# Ответов модели одновременно. vLLM считает одновременные запросы одной пачкой;
-# сверх этого числа вопросы ждут здесь, и человек видит своё место в очереди.
-MAX_PARALLEL = max(1, int(os.environ.get("KBRAG_PARALLEL", "4")))
+# Сколько ответов модели сразу и очередь сверх этого — kbrag/turns.py: одна на бота и
+# страницу (web --tg), иначе они вдвоём перегружали модель.
 MAX_SESSIONS = 300  # разговоров в памяти; старые забываются
 MAX_TERRITORIES = 400  # сущностей в разговоре (для кнопок картинки связей)
 DENIED_EVERY = 600  # как часто чужому напоминать его id, с
@@ -94,9 +92,6 @@ class BotBase:
         self.offset: int | None = None
         self.background = False  # в run() — ответы модели в отдельном потоке
         self.workers: dict[int, threading.Thread] = {}
-        self.slots = threading.BoundedSemaphore(MAX_PARALLEL)  # ответов одновременно
-        self.lock = threading.Lock()
-        self.waiting = 0  # сколько ответов ждут очереди
         self.denied: dict[int, float] = {}  # чужой → когда последний раз отвечали
         self.guest_questions: dict[int, list[float]] = {}  # гость → когда спрашивал
         self.seen: list[int] = []  # последние update_id: не брать дважды

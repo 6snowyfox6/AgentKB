@@ -30,7 +30,7 @@ class Reranker:
     def __init__(self, model_id: str = MODEL, device: str = "auto") -> None:
         from sentence_transformers import CrossEncoder
 
-        from .embed import _auto_device
+        from .embed import _auto_device, offline_first
 
         self.device = _auto_device() if device == "auto" else device
         self.model_id = model_id
@@ -39,7 +39,9 @@ class Reranker:
             import torch
 
             kwargs["model_kwargs"] = {"torch_dtype": torch.float16}
-        self.model = CrossEncoder(model_id, device=self.device, max_length=MAX_LENGTH, **kwargs)
+        self.model = offline_first(
+            lambda: CrossEncoder(model_id, device=self.device, max_length=MAX_LENGTH, **kwargs)
+        )
         self.lock = threading.Lock()  # одна модель на все потоки сервера
 
     def score(self, query: str, texts: list[str]) -> list[float]:

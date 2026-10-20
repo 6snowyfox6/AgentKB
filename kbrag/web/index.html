@@ -44,8 +44,79 @@
   h1 { font-family: var(--serif); font-size: 32px; margin: 0; }
   h2.section { font-family: var(--serif); font-size: 22px; margin: 0; }
   .stats { color: var(--muted); font-size: 14px; }
-  .kb-pick { display: flex; gap: 8px; align-items: center; font-size: 14px; color: var(--muted); }
-  .kb-pick select { font: inherit; color: var(--ink); max-width: 100%; }
+  /* Выбор базы: заголовок — кнопка, путь над ним, панель с деревом под ним. */
+  .kb-crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px;
+               font-size: 13px; color: var(--muted); min-height: 20px; }
+  .kb-crumbs a { color: inherit; text-decoration: none; border-bottom: 1px solid transparent; }
+  .kb-crumbs a:hover { color: var(--ink); border-bottom-color: var(--rule); }
+  .kb-crumbs .sep { opacity: 0.6; }
+  .kb-switch { position: relative; }
+  h1.kb-h1 { margin: 0; }
+  .kb-button {
+    all: unset; cursor: pointer; display: inline;  /* стрелка — сразу за последним словом */
+    box-decoration-break: clone; -webkit-box-decoration-break: clone;
+    font-family: var(--serif); font-size: 32px; font-weight: 700; line-height: 1.2;
+    color: var(--ink); border-radius: 8px; padding: 2px 8px; margin-left: -8px;
+    max-width: 100%;
+  }
+  .kb-button:hover { background: var(--sunken); }
+  .kb-button:focus-visible { outline: 2px solid var(--gpu); outline-offset: 2px; }
+  .kb-button .kb-name { overflow-wrap: anywhere; }
+  .kb-chev { display: inline-block; margin-left: 12px; vertical-align: middle;
+             width: 10px; height: 10px; border-right: 2.5px solid var(--muted);
+             border-bottom: 2.5px solid var(--muted); transform: translateY(-5px) rotate(45deg);
+             transition: transform 0.15s; }
+  .kb-button[aria-expanded="true"] .kb-chev { transform: translateY(1px) rotate(225deg); }
+  .kb-pop {
+    position: absolute; top: calc(100% + 8px); left: -8px; z-index: 30;
+    width: min(460px, calc(100vw - 32px)); max-height: min(70vh, 560px);
+    display: flex; flex-direction: column; background: var(--surface);
+    border: 1px solid var(--rule); border-radius: 12px;
+    box-shadow: 0 12px 32px rgba(34, 31, 26, 0.16), 0 2px 6px rgba(34, 31, 26, 0.08);
+    overflow: hidden;
+  }
+  .kb-pop input[type="search"] {
+    flex: none; border: none; border-bottom: 1px solid var(--rule); border-radius: 0;
+    padding: 12px 16px; background: var(--surface); font-size: 15px;
+  }
+  .kb-pop input[type="search"]:focus-visible { outline: none; background: var(--sunken); }
+  .kb-tree { list-style: none; margin: 0; padding: 6px; overflow-y: auto; flex: 1 1 auto; }
+  .kb-row {
+    display: flex; align-items: center; gap: 6px; padding: 7px 10px 7px 4px;
+    border-radius: 8px; cursor: pointer; font-size: 15px; line-height: 1.3; color: var(--ink);
+  }
+  .kb-row:hover, .kb-row.active { background: var(--sunken); }
+  .kb-row.current { box-shadow: inset 3px 0 0 var(--gpu); font-weight: 600; }
+  .kb-row.empty { color: var(--muted); }
+  .kb-row .twist {
+    all: unset; flex: none; width: 22px; height: 22px; display: grid; place-items: center;
+    border-radius: 6px; cursor: pointer; color: var(--muted);
+  }
+  .kb-row .twist:hover { background: var(--rule); color: var(--ink); }
+  .kb-row .twist::before { content: ""; width: 6px; height: 6px; border-right: 2px solid currentColor;
+                           border-bottom: 2px solid currentColor; transform: rotate(-45deg);
+                           transition: transform 0.12s; }
+  .kb-row.kb-open .twist::before { transform: rotate(45deg); }
+  .kb-row .twist.leaf { visibility: hidden; }
+  .kb-row .label { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+  .kb-row .label mark { background: none; color: var(--gpu); font-weight: 600; }
+  .kb-row .count { flex: none; font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums;
+                   font-weight: 400; }
+  .kb-row.all { margin-bottom: 4px; }
+  .kb-sep { height: 1px; background: var(--rule); margin: 4px 6px 6px; }
+  .kb-more { all: unset; cursor: pointer; display: block; margin: 4px 6px; padding: 6px 8px;
+             font-size: 13px; color: var(--muted); border-radius: 6px; }
+  .kb-more:hover { color: var(--ink); background: var(--sunken); }
+  .kb-none { padding: 14px 12px; font-size: 14px; color: var(--muted); }
+  .kb-hint { flex: none; border-top: 1px solid var(--rule); padding: 8px 14px; font-size: 12px;
+             color: var(--muted); background: var(--ground); }
+  .kb-hint kbd { font-family: var(--sans); font-size: 11px; border: 1px solid var(--rule);
+                 border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; background: var(--surface); }
+  @media (max-width: 560px) {
+    .kb-button { font-size: 26px; }
+    .kb-pop { position: fixed; top: 12px; left: 16px; right: 16px; width: auto; max-height: calc(100vh - 24px); }
+    .kb-hint { display: none; }  /* клавиш на телефоне нет */
+  }
 
   form { display: flex; flex-direction: column; gap: 12px; }
   .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
@@ -92,12 +163,17 @@
   .legend { font-size: 13px; color: var(--muted); }
   label.opt { display: flex; gap: 6px; align-items: center; margin-top: 6px; cursor: pointer; }
 
-  .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--rule); }
+  /* Вкладки — в одну строку; не влезли (телефон) — ряд листается вбок, а не переносит
+     «Чат-бот» и «Граф связей» по слову на строку. */
+  .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--rule);
+          overflow-x: auto; scrollbar-width: none; }
+  .tabs::-webkit-scrollbar { display: none; }
   .tab {
     font: inherit; font-weight: 500; cursor: pointer; color: var(--muted);
     background: none; border: none; border-bottom: 2px solid transparent;
-    padding: 8px 14px; border-radius: 0;
+    padding: 8px 14px; border-radius: 0; white-space: nowrap; flex: none;
   }
+  @media (max-width: 420px) { .tab { padding: 8px 10px; } }
   .tab[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--gpu); }
   .tab:hover { color: var(--ink); opacity: 1; }
   [hidden] { display: none !important; }
@@ -243,6 +319,7 @@
   .articles { margin: 10px 0; font-size: 14px; }
   .articles ol { margin: 4px 0 0; padding-left: 22px; display: flex; flex-direction: column; gap: 4px; }
   .articles .title { font-family: var(--serif); }
+  .articles .note { color: var(--muted); font-size: 13px; }
   .articles a { white-space: nowrap; }
   .figures { display: flex; flex-wrap: wrap; gap: 12px; margin: 10px 0; }
   .figures figure { margin: 0; flex: 1 1 220px; max-width: 360px; }
@@ -260,9 +337,20 @@
 <div class="wrap">
 
   <header>
-    <h1 id="kb-title">База знаний</h1>
-    <label class="kb-pick">База: <select id="kb" aria-label="С какой базой дерева работать">
-      <option value="">загружаю…</option></select></label>
+    <nav class="kb-crumbs" id="kb-crumbs" aria-label="Где эта база в дереве"></nav>
+    <div class="kb-switch">
+      <h1 class="kb-h1"><button type="button" class="kb-button" id="kb-button"
+          aria-haspopup="dialog" aria-expanded="false" aria-controls="kb-pop"
+          title="Сменить базу (Ctrl+K)"><span class="kb-name" id="kb-title">База знаний</span><span
+          class="kb-chev" aria-hidden="true"></span></button></h1>
+      <div class="kb-pop" id="kb-pop" role="dialog" aria-label="Выбор базы знаний" hidden>
+        <input type="search" id="kb-filter" placeholder="Найти базу…" autocomplete="off"
+               aria-label="Найти базу по названию" aria-controls="kb-tree">
+        <ul class="kb-tree" id="kb-tree" role="tree" aria-label="Базы знаний"></ul>
+        <div class="kb-hint"><kbd>↑</kbd><kbd>↓</kbd> выбор · <kbd>←</kbd><kbd>→</kbd> свернуть,
+          раскрыть · <kbd>Enter</kbd> открыть · <kbd>Esc</kbd> закрыть</div>
+      </div>
+    </div>
     <div class="stats" id="stats">загружаю…</div>
   </header>
 
@@ -519,30 +607,16 @@ function withKb(url) {
   return url + (url.includes("?") ? "&" : "?") + "kb=" + encodeURIComponent(KB.path || ".");
 }
 async function loadKbs() {
-  const select = $("kb");
   let data;
   try {
     data = await (await fetch(withKb("/api/kbs"))).json();
-  } catch (e) { select.innerHTML = "<option>сервер не ответил</option>"; return; }
+  } catch (e) { $("kb-title").textContent = "Сервер не ответил"; return; }
   if (data.error) {  // в адресе или в памяти браузера — база, которой нет
     try { localStorage.removeItem(KB_KEY); } catch (e) { /* без памяти */ }
     location.href = location.pathname;
     return;
   }
-  select.innerHTML = "";
-  const all = document.createElement("option");
-  all.value = ".";
-  all.textContent = "Все базы — всё дерево";
-  select.append(all);
-  for (const n of data.nodes) {
-    const o = document.createElement("option");
-    o.value = n.path;
-    const count = n.subtree === null ? "" : ` · ${articles(n.subtree)}`;
-    o.textContent = "\u00a0\u00a0".repeat(n.depth) + n.title + count +
-      (n.path === data.server ? " (по умолчанию)" : "");
-    select.append(o);
-  }
-  select.value = data.current || ".";
+  KB_PICK.setData(data);
   $("kb-title").textContent = data.current ? data.title : "Все базы";
   document.title = $("kb-title").textContent + " — база знаний";
   const box = $("examples");
@@ -556,10 +630,211 @@ async function loadKbs() {
   }
   box.hidden = !box.children.length || $("chat").children.length > 0;
 }
-$("kb").addEventListener("change", (ev) => {
-  try { localStorage.setItem(KB_KEY, ev.target.value); } catch (e) { /* без памяти */ }
-  location.href = location.pathname;  // ?kb= из адреса — больше не главнее выбора
-});
+// Сменить базу: выбор запоминает браузер, страница открывается заново уже по ней —
+// поиск, статьи, граф и чат. ?kb= из адреса после этого больше не главнее выбора.
+function switchKb(path) {
+  try { localStorage.setItem(KB_KEY, path || "."); } catch (e) { /* без памяти */ }
+  location.href = location.pathname;
+}
+
+// Панель выбора базы: дерево с раскрытием, поиск по названию, клавиатура. Пустые базы
+// (статей нет или есть только в настройках) спрятаны под «показать пустые».
+const KB_PICK = (() => {
+  const pop = $("kb-pop"), button = $("kb-button"), tree = $("kb-tree"), filter = $("kb-filter");
+  let nodes = [], current = ".", open = new Set(), showEmpty = false, active = 0, rows = [];
+
+  const parentOf = (p) => (p.includes(".") ? p.slice(0, p.lastIndexOf(".")) : "");
+  const ancestors = (p) => {
+    const out = [];
+    for (let q = parentOf(p); q; q = parentOf(q)) out.unshift(q);
+    return out;
+  };
+  const isEmpty = (n) => !n.subtree;  // 0 или null — нет статей
+  const kids = (p) => nodes.filter((n) => parentOf(n.path) === p);
+
+  function setData(data) {
+    nodes = data.nodes;
+    current = data.current || ".";
+    // Раскрыто: путь к текущей базе и верхние ветки, где есть статьи.
+    open = new Set(ancestors(current));
+    if (current !== ".") open.add(current);
+    for (const n of nodes) if (n.depth === 0 && !isEmpty(n)) open.add(n.path);
+    renderCrumbs();
+  }
+
+  function renderCrumbs() {
+    const box = $("kb-crumbs");
+    box.innerHTML = "";
+    if (current === ".") return;
+    const byPath = Object.fromEntries(nodes.map((n) => [n.path, n]));
+    const link = (path, text) => {
+      const a = document.createElement("a");
+      a.href = "#";
+      a.textContent = text;
+      a.addEventListener("click", (ev) => { ev.preventDefault(); switchKb(path); });
+      return a;
+    };
+    box.append(link(".", "Все базы"));
+    for (const p of ancestors(current)) {
+      const sep = document.createElement("span");
+      sep.className = "sep";
+      sep.textContent = "›";
+      box.append(sep, link(p, byPath[p] ? byPath[p].title : p));
+    }
+  }
+
+  function highlight(text, query) {
+    const span = document.createElement("span");
+    span.className = "label";
+    const i = query ? text.toLowerCase().indexOf(query) : -1;
+    if (i < 0) { span.textContent = text; return span; }
+    const mark = document.createElement("mark");
+    mark.textContent = text.slice(i, i + query.length);
+    span.append(text.slice(0, i), mark, text.slice(i + query.length));
+    return span;
+  }
+
+  function row(n, depth, hasKids, query) {
+    const li = document.createElement("li");
+    li.className = "kb-row";
+    li.setAttribute("role", "treeitem");
+    li.dataset.path = n.path;
+    li.style.paddingLeft = 4 + depth * 18 + "px";
+    if (n.path === current) { li.classList.add("current"); li.setAttribute("aria-current", "true"); }
+    if (isEmpty(n)) li.classList.add("empty");
+    const twist = document.createElement("button");
+    twist.type = "button";
+    twist.className = "twist" + (hasKids && !query ? "" : " leaf");
+    twist.tabIndex = -1;
+    if (hasKids && !query) {
+      const isOpen = open.has(n.path);
+      li.classList.toggle("kb-open", isOpen);  // не «open»: так на странице кнопка «открыть»
+      li.setAttribute("aria-expanded", String(isOpen));
+      twist.setAttribute("aria-label", isOpen ? "Свернуть" : "Раскрыть");
+      twist.addEventListener("click", (ev) => { ev.stopPropagation(); toggle(n.path); });
+    }
+    const count = document.createElement("span");
+    count.className = "count";
+    count.textContent = n.subtree === null ? "нет статей" : n.subtree ? articles(n.subtree) : "пусто";
+    li.append(twist, highlight(n.title, query), count);
+    li.addEventListener("click", () => switchKb(n.path));
+    return li;
+  }
+
+  function render() {
+    const query = filter.value.trim().toLowerCase();
+    tree.innerHTML = "";
+    const total = nodes.filter((n) => n.depth === 0).reduce((s, n) => s + (n.subtree || 0), 0);
+    const all = row({ path: ".", title: "Все базы", subtree: total }, 0, false, "");
+    all.classList.add("all");
+    if (current === ".") { all.classList.add("current"); all.setAttribute("aria-current", "true"); }
+    if (!query) tree.append(all, Object.assign(document.createElement("li"), { className: "kb-sep" }));
+
+    if (query) {
+      // Поиск: совпавшие базы плоским списком, с путём родителей в названии.
+      const byPath = Object.fromEntries(nodes.map((n) => [n.path, n]));
+      for (const n of nodes) {
+        const path = [...ancestors(n.path).map((p) => (byPath[p] || { title: p }).title), n.title];
+        const text = path.join(" › ");
+        if (!text.toLowerCase().includes(query) && !n.path.includes(query)) continue;
+        tree.append(row({ ...n, title: text }, 0, false, query));
+      }
+      if (!tree.children.length) {
+        tree.append(Object.assign(document.createElement("li"), {
+          className: "kb-none", textContent: "Такой базы нет",
+        }));
+      }
+    } else {
+      const shown = (n) => showEmpty || !isEmpty(n) || n.path === current;
+      const walk = (parent, depth) => {
+        for (const n of kids(parent).filter(shown)) {
+          const sub = kids(n.path).filter(shown);
+          tree.append(row(n, depth, sub.length > 0, ""));
+          if (sub.length && open.has(n.path)) walk(n.path, depth + 1);
+        }
+      };
+      walk("", 0);
+      const empties = nodes.filter(isEmpty).length;
+      if (empties) {
+        const more = document.createElement("button");
+        more.type = "button";
+        more.className = "kb-more";
+        more.textContent = showEmpty ? "скрыть пустые базы" : `показать пустые базы (${empties})`;
+        more.addEventListener("click", () => { showEmpty = !showEmpty; render(); filter.focus(); });
+        tree.append(more);
+      }
+    }
+    rows = [...tree.querySelectorAll(".kb-row")];
+    const at = rows.findIndex((r) => r.classList.contains("current"));
+    setActive(query ? 0 : Math.max(0, at));
+  }
+
+  function setActive(i) {
+    if (!rows.length) return;
+    active = Math.max(0, Math.min(rows.length - 1, i));
+    rows.forEach((r, j) => r.classList.toggle("active", j === active));
+    rows[active].scrollIntoView({ block: "nearest" });
+  }
+
+  function toggle(path, want) {
+    const isOpen = open.has(path);
+    if (want === isOpen) return false;
+    if (isOpen) open.delete(path); else open.add(path);
+    const keep = rows[active] && rows[active].dataset.path;
+    render();
+    const i = rows.findIndex((r) => r.dataset.path === keep);
+    if (i >= 0) setActive(i);
+    return true;
+  }
+
+  function show() {
+    if (!nodes.length) return;
+    pop.hidden = false;
+    button.setAttribute("aria-expanded", "true");
+    filter.value = "";
+    render();
+    filter.focus();
+  }
+  function hide(focusButton = true) {
+    if (pop.hidden) return;
+    pop.hidden = true;
+    button.setAttribute("aria-expanded", "false");
+    if (focusButton) button.focus();
+  }
+
+  button.addEventListener("click", () => (pop.hidden ? show() : hide()));
+  filter.addEventListener("input", render);
+  filter.addEventListener("keydown", (ev) => {
+    const r = rows[active];
+    if (ev.key === "ArrowDown") { ev.preventDefault(); setActive(active + 1); }
+    else if (ev.key === "ArrowUp") { ev.preventDefault(); setActive(active - 1); }
+    else if (ev.key === "Enter") { ev.preventDefault(); if (r) switchKb(r.dataset.path); }
+    else if (ev.key === "Escape") { ev.preventDefault(); hide(); }
+    else if (!filter.value && r && (ev.key === "ArrowRight" || ev.key === "ArrowLeft")) {
+      ev.preventDefault();
+      const path = r.dataset.path;
+      const right = ev.key === "ArrowRight";
+      if (right && r.getAttribute("aria-expanded") === "false") toggle(path, true);
+      else if (right && r.getAttribute("aria-expanded") === "true") setActive(active + 1);
+      else if (!right && r.getAttribute("aria-expanded") === "true") toggle(path, false);
+      else if (!right && parentOf(path)) {
+        const i = rows.findIndex((x) => x.dataset.path === parentOf(path));
+        if (i >= 0) setActive(i);
+      }
+    }
+  });
+  document.addEventListener("mousedown", (ev) => {
+    if (!pop.hidden && !pop.contains(ev.target) && !button.contains(ev.target)) hide(false);
+  });
+  // Ctrl+K — по физической клавише: в русской раскладке это «Л», и ev.key там «л».
+  document.addEventListener("keydown", (ev) => {
+    if ((ev.ctrlKey || ev.metaKey) && ev.code === "KeyK") {
+      ev.preventDefault();
+      if (pop.hidden) show(); else hide();
+    }
+  });
+  return { setData };
+})();
 
 // Число со словом в нужной форме: 1 статья, 2 статьи, 5 статей, 21 статья, 11 статей.
 function plural(n, one, few, many) {
@@ -1642,6 +1917,10 @@ function renderNotInBase(ev) {
     // Вопрос не по теме базы: ответа из общих знаний нет, только отказ.
     head.textContent = "Вопрос не по теме базы знаний.";
     line.textContent = "Бот отвечает только по теме выбранной базы знаний — её статьям.";
+  } else if (ev.not_found) {
+    // По теме, но в базе пусто, а общие знания базе выключены (kb.yaml: общие_знания).
+    head.textContent = "По вашему запросу в базе знаний такой информации нет.";
+    line.textContent = "Ответ из общих знаний модели для этой базы выключен. Можно спросить иначе: другими словами, с терминами по-английски.";
   } else {
     head.textContent = "По вашему запросу в базе знаний такой информации нет.";
     line.textContent = "Ниже — ответ модели из её общих знаний. Он не подтверждён статьями базы — проверяйте его.";
@@ -1659,12 +1938,14 @@ function renderNotInBase(ev) {
 // Статьи, на которые опирается ответ (chat/references.py): по строке на статью —
 // авторы, год, название, журнал; номера её фрагментов (щёлкнуть — фрагмент) и ссылки:
 // DOI, издатель, свой PDF на диске — сразу на процитированной странице.
-function renderArticles(bot, articles) {
+// catalog — ответ на каталожный вопрос («сколько статей про…»): статьи без номеров
+// фрагментов, у каждой — почему она в списке (note).
+function renderArticles(bot, articles, catalog = false) {
   const box = document.createElement("div");
   box.className = "articles";
   const head = document.createElement("div");
   head.className = "sub";
-  head.textContent = "Статьи, на которые опирается ответ";
+  head.textContent = catalog ? "Статьи" : "Статьи, на которые опирается ответ";
   const list = document.createElement("ol");
   for (const a of articles) {
     const li = document.createElement("li");
@@ -1675,7 +1956,14 @@ function renderArticles(bot, articles) {
     const title = document.createElement("span");
     title.className = "title";
     title.textContent = a.title + (a.journal ? `. ${a.journal}` : "");
-    li.append(who, title, " — ");
+    li.append(who, title);
+    if (a.note) {
+      const why = document.createElement("span");
+      why.className = "note";
+      why.textContent = " — " + a.note;
+      li.append(why);
+    }
+    if (a.fragments.length) li.append(" — ");
     for (const n of a.fragments) {
       const c = document.createElement("span");
       c.className = "cite";
@@ -1960,7 +2248,7 @@ async function ask(question) {
   const ctrl = new AbortController();
   chat.abort = ctrl;
   let text = "", sources = [], queries = [], general = null, done = null, error = null, info = {};
-  let removed = [], figures = [];
+  let removed = [], unsupported = [], figures = [];
   try {
     const resp = await fetch("/api/chat", {
       method: "POST",
@@ -2006,6 +2294,7 @@ async function ask(question) {
           // Фразы без ссылки на фрагмент убраны: ответ показывается заново.
           text = ev.text;
           removed = ev.removed || [];
+          unsupported = ev.unsupported || [];
           answer.innerHTML = renderAnswer(text, sources.length);
         } else if (ev.type === "figures") {
           figures = ev.figures || [];  // рисунки процитированных фрагментов — после ответа
@@ -2031,21 +2320,34 @@ async function ask(question) {
     if (/модел/i.test(error)) loadBotStatus();  // сервер модели молчит — обновить строку состояния
   }
   const used = done ? done.used : [];
-  if (done && done.articles && done.articles.length) bot.append(renderArticles(bot, done.articles));
+  if (done && done.catalog) {
+    // Каталожный ответ: в тексте — шапка (число, как считалось), статьи — списком ниже,
+    // со ссылками на DOI и PDF, а не текстом второй раз.
+    answer.innerHTML = renderAnswer(done.catalog.head, 0);
+  }
+  if (done && done.articles && done.articles.length) {
+    bot.append(renderArticles(bot, done.articles, !!done.catalog));
+  }
   if (figures.length) bot.append(renderFigures(figures));
   if (sources.length && !general) {
     bot.append(renderGraphLinks(bot, sources, used));
     bot.append(renderSources(sources, used, queries, info));
   }
-  if (removed.length) {
-    // Что убрано из ответа: фразы модели без ссылки на фрагмент статьи.
+  // Что убрано из ответа: фразы модели без ссылки на фрагмент статьи и утверждения,
+  // которых их фрагменты не подтверждают (сверка ссылок, chat/support.py).
+  const dropped = [
+    [removed, (n) => `Фраз без ссылки на фрагмент убрано: ${n} — это слова модели, а не статей`],
+    [unsupported, (n) => `Утверждений, которых не подтверждают их фрагменты, убрано: ${n}`],
+  ];
+  for (const [list, title] of dropped) {
+    if (!list.length) continue;
     const d = document.createElement("details");
     d.className = "removed";
     const sum = document.createElement("summary");
-    sum.textContent = `Фраз без ссылки на фрагмент убрано: ${removed.length} — это слова модели, а не статей`;
+    sum.textContent = title(list.length);
     d.append(sum);
     const ul = document.createElement("ul");
-    for (const r of removed) {
+    for (const r of list) {
       const li = document.createElement("li");
       li.textContent = r;
       ul.append(li);
@@ -2064,7 +2366,7 @@ async function ask(question) {
     const foot = document.createElement("div");
     foot.className = "bot-foot";
     const bits = [`${done.model} · ${String(done.seconds).replace(".", ",")} с`];
-    if (done.mode === "без базы" && !done.off_topic) bits.push("ответ модели, не из базы знаний");
+    if (done.mode === "без базы" && !done.off_topic && !done.not_found) bits.push("ответ модели, не из базы знаний");
     if (done.rounds > 1) bits.push(`поиск в ${done.rounds} круга`);
     const [cited, claims] = done.coverage || [0, 0];
     if (claims) bits.push(`ссылка на фрагмент — у ${cited} из ${claims} утверждений`);

@@ -21,6 +21,7 @@ from contextlib import nullcontext
 from dataclasses import dataclass, field
 from typing import Any
 
+from ..machine import integer
 from . import textlang
 
 RRF_K = 60
@@ -112,6 +113,32 @@ def _transaction(conn: Any) -> Any:
     return begin() if callable(begin) else nullcontext()
 
 
+# Маленькая ветка (или узкий доступ, год, источник) — перебором, без HNSW. Индекс один
+# на все фрагменты: с фильтром он берёт ближайших по всей базе и отсеивает чужих, и чем
+# меньше доля ветки, тем дольше добирает — ветка в 32 статьи из 120 искалась 220 мс
+# против 28 без фильтра, а на полной базе доля в десятки раз меньше. Перебор 20 тыс.
+# фрагментов — около 100 мс, и он точный. Порог — KBRAG_EXACT_MAX.
+EXACT_MAX = integer("KBRAG_EXACT_MAX", 50_000, low=0)
+
+
+def _small(cur: Any, clause: str, params: dict[str, Any]) -> bool:
+    """В отобранном не больше EXACT_MAX фрагментов. Считает не дальше порога."""
+    if not clause or not EXACT_MAX:
+        return False
+    cur.execute(
+        f"""
+        SELECT count(*) FROM (
+            SELECT 1 FROM chunks c JOIN documents d ON d.doc_id = c.doc_id
+            WHERE c.embedding IS NOT NULL {clause}
+            LIMIT %(exact_max)s
+        ) t
+        """,
+        {**params, "exact_max": EXACT_MAX + 1},
+    )
+    row = cur.fetchone()
+    return row is not None and int(row[0]) <= EXACT_MAX
+
+
 def vector_search(
     conn: Any,
     vector: list[float],
@@ -126,13 +153,18 @@ def vector_search(
     clause, params = _filters(year_from, source, kb, docs)
     params.update({"q": vector_literal(vector), "limit": limit})
     with _transaction(conn), conn.cursor() as cur:
-        _tune_hnsw(cur, limit, bool(clause))
+        exact = _small(cur, clause, params)
+        if not exact:
+            _tune_hnsw(cur, limit, bool(clause))
+        # «+ 0» — порядок не по выражению индекса: Postgres его не берёт и перебирает
+        # отобранные фрагменты (по индексу chunks.doc_id).
+        order = "(c.embedding <=> %(q)s::vector) + 0" if exact else "c.embedding <=> %(q)s::vector"
         cur.execute(
             f"""
             SELECT {SELECT_FIELDS}, 1 - (c.embedding <=> %(q)s::vector) AS score
             FROM chunks c JOIN documents d ON d.doc_id = c.doc_id
             WHERE c.embedding IS NOT NULL {clause}
-            ORDER BY c.embedding <=> %(q)s::vector
+            ORDER BY {order}
             LIMIT %(limit)s
             """,
             params,

@@ -128,3 +128,40 @@ def test_off_topic_refusal_from_kb(monkeypatch: pytest.MonkeyPatch, tmp_path: Pa
     )
     general = next(e for e in events if e["type"] == "general")
     assert general.get("off_topic") and "геолог" in general["text"]
+
+
+@pytest.mark.parametrize("allowed", [False, True])
+def test_general_knowledge_switch(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, allowed: bool
+) -> None:
+    """По теме, но в базе пусто: общие_знания: false — отказ, true — ответ модели."""
+    from kbrag import kb as kbmod
+    from kbrag.chat.plan import Part, Plan
+
+    real = kbmod.get("geology")
+    node = kbmod.KB(real.path, {**real.settings, "общие_знания": allowed}, real.dirs, real.own)
+    monkeypatch.setattr(chat, "get_kb", lambda path=None: node)
+    monkeypatch.setattr(retrieval, "candidates", lambda *a, **k: [])
+    monkeypatch.setattr(retrieval, "merged_search", lambda *a, **k: [])
+    monkeypatch.setattr(chat, "LOGS", tmp_path)
+    plan = Plan([Part("Сколько статей про Марокко?", ["Марокко"])], on_topic=True)
+    events = list(
+        chat.answer(
+            None,
+            None,
+            "Сколько статей про Марокко?",
+            [],
+            Settings(kb="geology"),
+            llm=llm,
+            planner=lambda q, h, s: plan,
+            judge=lambda *a: {"подходят": [], "не_хватает": [], "запросы": []},
+            datasets=None,
+        )
+    )
+    general = next(e for e in events if e["type"] == "general")
+    tokens = [e for e in events if e["type"] == "token"]
+    done = events[-1]
+    assert done["type"] == "done" and done["mode"] == "без базы"
+    assert bool(tokens) is allowed
+    assert bool(general.get("not_found")) is not allowed
+    assert bool(done.get("not_found")) is not allowed

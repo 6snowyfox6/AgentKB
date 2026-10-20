@@ -39,9 +39,38 @@ PLAN_USER = """Вопрос пользователя: «{question}»
    Если вопрос новый и понятен сам по себе — повтори его как есть, предыдущий не
    приплетай.
 6. «по_теме» — true, если вопрос {по_теме}; false — если о другом ({не_по_теме}…).
+7. «каталог» — если вопрос о самом наборе статей базы: сколько статей о чём-то, перечисли \
+или покажи статьи (о теме, автора, за годы), какие статьи или работы есть («сколько статей \
+о радаре», «какие статьи Смита есть в базе», «какие работы есть у Петрова», «статьи за 2020 \
+год»). Тогда — объект: «тема» — коротко, о чём \
+(без слов «статьи», годов и автора); «основы» — СПИСОК основ слов темы для поиска \
+подстрокой в названиях и тексте: по 1–2 слова, усечённые до основы, на русском, \
+английском и других языках статей, с вариантами названий (для Франции: France, French, \
+Франц; для нейросетей: neural network, deep learning, нейросет, CNN); нет темы — пустой \
+список; «год_от», «год_до» — числом; «автор» — фамилия латиницей, как в научных статьях; \
+не названы — null. Каталожный вопрос всегда «по_теме»: true. Вопрос о содержании статей \
+(что в них сказано, как, почему, какие выводы) — не каталог: null.
 
 Верни JSON: {{"вопрос_целиком": "...", "части": [{{"вопрос": "...", "запросы": ["...", "..."]}}], \
-"предмет": null, "всё": false, "по_теме": true}}"""
+"предмет": null, "всё": false, "по_теме": true, "каталог": null}}"""
+
+# Статьи на языках, до которых русский и английский запрос не дотягивается: у базы
+# линеаментов китайская статья об Илийском бассейне по-русски и по-английски не
+# находилась вовсе, а по-китайски стояла первой (сходство 0,72 против 0,56 у случайных;
+# стресс-тест 20.10.2026). Языки — тема.языки_перевода в kb.yaml; нет их — правила нет.
+TRANSLATE_RULE = """
+8. «перевод» — суть вопроса коротким поисковым запросом (ключевые термины, 4–15 \
+иероглифов или 2–6 слов, не весь вопрос) на каждом из языков по порядку: {languages}. \
+В базе есть статьи на них, и запрос по-русски или по-английски их не находит. Названия \
+мест и терминов — так, как их пишут на этом языке. Пиши именно на этих языках (не \
+по-корейски, если корейского в списке нет).
+В JSON добавь: "перевод": ["...", "..."] — по запросу на каждый язык, в том же порядке."""
+
+
+def translate_languages(kb: Any) -> list[str]:
+    raw = kb.topic.get("языки_перевода") or []
+    return [str(x) for x in (raw if isinstance(raw, list) else [raw]) if str(x).strip()]
+
 
 # Вопрос «собрать всё» — на случай, когда модель вопрос не разобрала.
 _COLLECT = re.compile(
@@ -93,6 +122,12 @@ class Plan:
     missing: list[str] = field(default_factory=list)  # чего не хватало, по словам модели
     standalone: str = ""  # вопрос, понятный без разговора (вдогонку — с предметом)
     on_topic: bool = True  # по теме ли базы вопрос, по словам модели
+    # Вопрос на языках_перевода базы. Ищется отдельно и даёт немного кандидатов сверху
+    # (retrieval.TRANSLATED): в общем списке запросов китайский запрос со словом
+    # «DRASTIC» притягивал таблицы и вытеснял нужную аннотацию.
+    translated: list[str] = field(default_factory=list)
+    # Вопрос о самом наборе статей («сколько статей про…») — что посчитать (catalog.py).
+    catalog: Any = None
 
     @property
     def queries(self) -> list[str]:
@@ -187,7 +222,21 @@ def parse_plan(data: Any, question: str, settings: Settings) -> Plan:
     standalone = " ".join(str(data.get("вопрос_целиком") or data.get("standalone") or "").split())
     topic = data.get("по_теме", data.get("on_topic", True))
     on_topic = not (topic is False or str(topic).lower() in {"false", "нет", "0"})
-    return Plan(parts, subject or None, collect, standalone=standalone[:300], on_topic=on_topic)
+    translated = data.get("перевод") or data.get("translated")
+    if isinstance(translated, str):
+        translated = [translated]
+    from .catalog import parse as parse_catalog
+
+    catalog = parse_catalog(data.get("каталог") or data.get("catalog"))
+    return Plan(
+        parts,
+        subject or None,
+        collect,
+        standalone=standalone[:300],
+        on_topic=on_topic,
+        translated=clean_queries(translated, 4),
+        catalog=catalog,
+    )
 
 
 def plan_question(question: str, history: list[dict[str, Any]], settings: Settings) -> Plan:
@@ -207,6 +256,9 @@ def plan_question(question: str, history: list[dict[str, Any]], settings: Settin
         parts=max(1, settings.parts),
         languages=languages(kb, " и хотя бы один "),
     )
+    extra = translate_languages(kb)
+    if extra:
+        user += TRANSLATE_RULE.format(languages=", ".join(extra))
     system = kb.prompt("разбор.система", PLAN_SYSTEM)
     try:
         data = settings.client().chat_json(system, user, temperature=0.2, timeout=(10, 90))

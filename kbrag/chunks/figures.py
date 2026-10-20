@@ -62,7 +62,7 @@ def vision_mode() -> str:
 def _figure_host() -> str:
     if vision_mode() == "single":
         return LLM_HOST
-    return f"http://localhost:{VISION_PORT}"
+    return f"http://127.0.0.1:{VISION_PORT}"
 
 
 FIGURE_MODEL = os.environ.get("KBRAG_FIGURE_MODEL", "").strip() or (

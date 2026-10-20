@@ -82,6 +82,7 @@ class Settings:
     # --- пороги валидации ---
     min_chars_per_page: int = 200  # меньше — текста почти нет
     max_garbage_ratio: float = 0.10  # доля «мусорных» символов (битые шрифты, cid)
+    max_stray_cjk: float = 0.01  # доля латинских слов с иероглифами внутри (validate.stray_cjk)
     min_sections_ratio: float = 0.8  # доля найденных разделов эталона
     min_entities_ratio: float = 0.8  # доля найденных сущностей эталона
     table_tolerance: int = 1  # допустимое расхождение в числе таблиц

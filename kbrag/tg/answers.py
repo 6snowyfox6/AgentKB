@@ -7,7 +7,7 @@ import time
 from dataclasses import replace
 from typing import Any
 
-from .. import acl
+from .. import acl, turns
 from . import ui
 from .api import TelegramError
 from .base import EDIT_EVERY, HISTORY_TURNS, KEEP, BotBase, Session
@@ -42,43 +42,37 @@ class AnswersMixin(BotBase):
             self._answer_safe(*args)
 
     def _answer_safe(self, chat_id: Any, session: Any, text: Any, history: Any) -> None:
-        try:
-            self._wait_turn(chat_id)
-            try:
-                self._guard(chat_id, text, self.answer, chat_id, session, text, history)
-            finally:
-                self.slots.release()
-        finally:
-            session.busy = False
+        """Ответ — когда подошла очередь (turns.py, одна на бота и страницу): все места у
+        модели заняты — человеку видно его место."""
+        note: dict[str, Any] = {}
 
-    def _wait_turn(self, chat_id: int) -> None:
-        """Все места у модели заняты (MAX_PARALLEL) — вопрос ждёт, человеку видно место в очереди."""
-        if self.slots.acquire(blocking=False):
-            return
-        with self.lock:
-            self.waiting += 1
-            place = self.waiting
-        try:
-            note = None
+        def queued(place: int) -> None:
+            if note:
+                return
+            note["sent"] = True
             try:
-                note = self.tg.send(
+                note["message"] = self.tg.send(
                     chat_id,
                     f"<i>Модель сейчас отвечает другим — вы в очереди, "
                     f"перед вами {place}. Ответ начнётся сам.</i>",
                 )
             except TelegramError:
                 pass
-            self.slots.acquire()
-            if note:
-                try:
-                    self.tg.edit(
-                        chat_id, note["message_id"], "<i>Очередь подошла — отвечаю ниже.</i>"
-                    )
-                except TelegramError:
-                    pass
+
+        try:
+            with turns.turn(on_wait=queued):
+                if note.get("message"):
+                    try:
+                        self.tg.edit(
+                            chat_id,
+                            note["message"]["message_id"],
+                            "<i>Очередь подошла — отвечаю ниже.</i>",
+                        )
+                    except TelegramError:
+                        pass
+                self._guard(chat_id, text, self.answer, chat_id, session, text, history)
         finally:
-            with self.lock:
-                self.waiting -= 1
+            session.busy = False
 
     def answer(
         self, chat_id: int, session: Session, text: str, history: list[dict[str, Any]] | None = None
@@ -162,6 +156,7 @@ class AnswersMixin(BotBase):
             "used": done.get("used"),
             "articles": done.get("articles") or [],
             "mode": done.get("mode"),
+            "not_found": done.get("not_found"),
             "model": done.get("model"),
             "seconds": done.get("seconds"),
             "timings": done.get("timings"),

@@ -23,15 +23,31 @@ stdin/stdout (MCP stdio), ничего другого туда не пишет.
 
 Адрес сервера — KBRAG_SERVE (по умолчанию http://127.0.0.1:8000).
 Доступ ограничен (.local/access.yaml) — токен человека в KBRAG_TOKEN.
+
+Удалённо (с другого компьютера) — тот же MCP по HTTP, на удалённой машине ставить
+ничего, кроме Claude Code, не нужно:
+
+    python kbrag.py web --remote          страница и MCP по адресу Tailscale (kbrag/remote.py)
+    python kbrag.py mcp --http --host 100.x.y.z    только MCP по HTTP (порт 8200)
+
+    claude mcp add --transport http kbrag http://АДРЕС:8200/mcp \\
+        --header "Authorization: Bearer ТОКЕН"
+
+Токен — человека из .local/access.yaml (python kbrag.py access add): каждый запрос идёт
+к серверу страницы с токеном того, кто спросил, и видит только его базы. Без
+access.yaml MCP по HTTP не запускается: открыть базу всем, кто дотянулся до порта, нельзя.
 """
 
 from __future__ import annotations
 
+import argparse
 import json
+import sys
 import urllib.error
 import urllib.parse
 import urllib.request
 from collections.abc import Callable
+from contextvars import ContextVar
 from typing import Any
 
 from .machine import value
@@ -40,6 +56,10 @@ BASE = value("KBRAG_SERVE", "http://127.0.0.1:8000")
 # Токен входа (python kbrag.py access add): есть .local/access.yaml — без него сервер не
 # ответит; инструменты видят только базы этого человека.
 TOKEN = value("KBRAG_TOKEN", "")
+# MCP по HTTP: токен того, кто прислал этот запрос (заголовок Authorization) — у каждого
+# запроса свой, запросы разных людей идут вперемешку.
+_REQUEST_TOKEN: ContextVar[str] = ContextVar("kbrag_mcp_token", default="")
+HTTP_PORT = 8200
 TIMEOUT = 120  # с: поиск с синонимами по большой базе — секунды, не минуты
 NOT_RUNNING = (
     "Сервер базы знаний не отвечает на {base}. Запустите его в отдельном окне: "
@@ -61,8 +81,9 @@ def _url(path: str, params: dict[str, Any]) -> str:
 def _fetch(path: str, **params: Any) -> tuple[bytes, str]:
     """Ответ сервера: тело и тип. Сервер ответил ошибкой — её JSON (там объяснение)."""
     request = urllib.request.Request(_url(path, params))
-    if TOKEN:
-        request.add_header("X-KBRAG-Token", TOKEN)  # доступ к базам — по людям (acl.py)
+    token = _REQUEST_TOKEN.get() or TOKEN
+    if token:
+        request.add_header("X-KBRAG-Token", token)  # доступ к базам — по людям (acl.py)
     try:
         with urllib.request.urlopen(request, timeout=TIMEOUT) as response:
             return response.read(), response.headers.get_content_type()
@@ -200,8 +221,109 @@ def build() -> Any:
     return server
 
 
-def main() -> int:
-    build().run()
+# --------------------------------------------------------------------------- #
+#  MCP по HTTP — для удалённых машин
+# --------------------------------------------------------------------------- #
+def _bearer(scope: dict[str, Any]) -> str:
+    for name, raw in scope.get("headers") or []:
+        if name.lower() == b"authorization":
+            kind, _, token = raw.decode("latin-1").partition(" ")
+            return token.strip() if kind.lower() == "bearer" else ""
+    return ""
+
+
+def http_app(host_names: list[str]) -> Any:
+    """Приложение ASGI: MCP по HTTP за проверкой токена. host_names — по каким именам и
+    адресам к нему обращаются (Host): остальные отбиваются — защита от DNS rebinding."""
+    from mcp.server.transport_security import TransportSecuritySettings
+
+    from . import acl
+
+    names = sorted({*host_names, "127.0.0.1", "localhost"})
+    security = TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=[f"{n}:*" for n in names] + names,
+        allowed_origins=[f"http://{n}:*" for n in names],
+    )
+    # stateless: у каждого запроса — свой разбор, без памяти о сеансе; сервер можно
+    # перезапускать, клиенты этого не заметят.
+    inner = build().streamable_http_app(stateless_http=True, transport_security=security)
+
+    async def deny(send: Any, why: str) -> None:
+        body = json.dumps({"error": why}, ensure_ascii=False).encode("utf-8")
+        await send(
+            {
+                "type": "http.response.start",
+                "status": 401,
+                "headers": [
+                    (b"content-type", b"application/json; charset=utf-8"),
+                    (b"www-authenticate", b'Bearer realm="kbrag"'),
+                ],
+            }
+        )
+        await send({"type": "http.response.body", "body": body})
+
+    async def app(scope: dict[str, Any], receive: Any, send: Any) -> None:
+        if scope["type"] != "http":
+            await inner(scope, receive, send)  # lifespan — запуск и остановка
+            return
+        token = _bearer(scope)
+        try:
+            person = acl.load().by_token(token) if token else None
+        except acl.AccessError:
+            person = None  # файл доступа с ошибкой — никого (как и страница)
+        if person is None:
+            await deny(send, "нужен токен: Authorization: Bearer … (python kbrag.py access add)")
+            return
+        mark = _REQUEST_TOKEN.set(token)
+        try:
+            await inner(scope, receive, send)
+        finally:
+            _REQUEST_TOKEN.reset(mark)
+
+    return app
+
+
+def check_remote() -> str | None:
+    """Почему MCP по HTTP запускать нельзя (None — можно): нет людей с токенами."""
+    from . import acl
+
+    try:
+        access = acl.load()
+    except acl.AccessError as exc:
+        return f"файл доступа .local/access.yaml с ошибкой: {exc}"
+    if not access.configured:
+        return (
+            "удалённый доступ — только по токенам, а людей с доступом нет. Добавьте: "
+            "python kbrag.py access add ИМЯ --kb . (печатает токен)"
+        )
+    return None
+
+
+def serve_http(host: str, port: int = HTTP_PORT, host_names: list[str] | None = None) -> Any:
+    """Сервер uvicorn с MCP по HTTP (не запущен: .run() — здесь же, или в потоке)."""
+    import uvicorn
+
+    app = http_app([host, *(host_names or [])])
+    config = uvicorn.Config(app, host=host, port=port, log_level="warning", lifespan="on")
+    return uvicorn.Server(config)
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="MCP-сервер базы знаний KBRAG")
+    parser.add_argument("--http", action="store_true", help="MCP по HTTP, а не stdio")
+    parser.add_argument("--host", default="127.0.0.1", help="адрес для --http")
+    parser.add_argument("--port", type=int, default=HTTP_PORT, help="порт для --http")
+    args = parser.parse_args(argv)
+    if not args.http:
+        build().run()
+        return 0
+    problem = check_remote()
+    if problem:
+        print(f"MCP по HTTP не запущен: {problem}", file=sys.stderr)
+        return 1
+    print(f"MCP по HTTP: http://{args.host}:{args.port}/mcp (сервер страницы — {BASE})")
+    serve_http(args.host, args.port).run()
     return 0
 
 
